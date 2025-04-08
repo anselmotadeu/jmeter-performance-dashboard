@@ -60,7 +60,7 @@ export default function PerformanceDashboard() {
   const [chartFilter, setChartFilter] = useState<string>("all");
   const [startTime, setStartTime] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
-  const [rampUpInfo, setRampUpInfo] = useState<{users: number; duration: string}>({users: 0, duration: "0s"});
+  const [rampUpInfo, setRampUpInfo] = useState<{ users: number; usersPerTest: number; duration: string }>({ users: 0, usersPerTest: 0, duration: "0s" });
   const [successCount, setSuccessCount] = useState<number>(0);
   const [errorCount, setErrorCount] = useState<number>(0);
   const [aggregateReport, setAggregateReport] = useState<AggregateReportItem[]>([]);
@@ -119,24 +119,57 @@ export default function PerformanceDashboard() {
     const sortedData = csvData
       .filter(row => row.allThreads > 0)
       .sort((a, b) => a.timeStamp - b.timeStamp);
-
-    if (sortedData.length === 0) return { users: 0, duration: "0s" };
-
+  
+    if (sortedData.length === 0) return { users: 0, usersPerTest: 0, duration: "0s" };
+  
     const rampStart = sortedData[0].timeStamp;
-    let maxUsers = 0;
+    let maxUsers = 0; // Total de usuários simultâneos
+    let maxUsersPerTest = 0; // Máximo por teste
     let rampEnd = rampStart;
-
+  
+    // Calcular o máximo por teste (label)
+    const threadsByLabel: { [key: string]: number } = {};
     sortedData.forEach(row => {
-      const currentThreads = Number(row.allThreads);
-      if (currentThreads > maxUsers) {
-        maxUsers = currentThreads;
-        rampEnd = row.timeStamp;
+      const label = row.label || "Unknown";
+      const currentThreads = Number(row.allThreads) || 0;
+      threadsByLabel[label] = Math.max(threadsByLabel[label] || 0, currentThreads);
+    });
+    maxUsersPerTest = Math.max(...Object.values(threadsByLabel));
+  
+    // Calcular o total de usuários simultâneos por timestamp
+    const threadsByTimestamp: { [key: number]: { [key: string]: number } } = {};
+    sortedData.forEach(row => {
+      const timestamp = row.timeStamp;
+      const label = row.label || "Unknown";
+      const currentThreads = Number(row.allThreads) || 0;
+  
+      if (!threadsByTimestamp[timestamp]) {
+        threadsByTimestamp[timestamp] = {};
+      }
+      // Armazenar o número de threads para cada label no timestamp
+      threadsByTimestamp[timestamp][label] = Math.max(
+        threadsByTimestamp[timestamp][label] || 0,
+        currentThreads
+      );
+    });
+  
+    // Encontrar o número máximo de usuários simultâneos
+    Object.entries(threadsByTimestamp).forEach(([timestamp, threadsByLabel]) => {
+      // Somar as threads de todos os labels naquele timestamp
+      const totalThreadsAtTimestamp = Object.values(threadsByLabel).reduce(
+        (sum, threads) => sum + threads,
+        0
+      );
+      if (totalThreadsAtTimestamp > maxUsers) {
+        maxUsers = totalThreadsAtTimestamp;
+        rampEnd = Number(timestamp);
       }
     });
-
+  
     const durationMs = rampEnd - rampStart;
     const rampUpResult = {
-      users: maxUsers,
+      users: maxUsers, // Total geral (deve ser 60)
+      usersPerTest: maxUsersPerTest, // Máximo por teste (30)
       duration: formatDuration(durationMs)
     };
     setRampUpInfo(rampUpResult);
@@ -436,76 +469,86 @@ export default function PerformanceDashboard() {
     return (
       <>
         {shouldShow("ramp-up") && (
-          <div style={{
-            backgroundColor: themeStyles[theme].cardBg,
-            padding: "15px",
-            borderRadius: "8px",
-            marginBottom: "20px"
-          }}>
-            <h3 style={{
-              color: theme === "dark" ? "#4E79A7" : "#1a5276",
-              textAlign: "center",
-              marginBottom: "15px"
-            }}>Ramp-up</h3>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: "20px",
-              marginBottom: "20px"
-            }}>
-              <div style={{
-                backgroundColor: themeStyles[theme].bg,
-                padding: "15px",
-                borderRadius: "5px",
-                textAlign: "center"
-              }}>
-                <p style={{ fontSize: "18px", margin: "0" }}>
-                  <strong>Usuários Máximos:</strong> {rampUpInfo.users}
-                </p>
-              </div>
-              <div style={{
-                backgroundColor: themeStyles[theme].bg,
-                padding: "15px",
-                borderRadius: "5px",
-                textAlign: "center"
-              }}>
-                <p style={{ fontSize: "18px", margin: "0" }}>
-                  <strong>Duração do Ramp-up:</strong> {rampUpInfo.duration}
-                </p>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={timeSeriesData}>
-                <CartesianGrid strokeDasharray="3 3" stroke={themeStyles[theme].gridStroke} />
-                <XAxis 
-                  dataKey="time" 
-                  stroke={themeStyles[theme].text}
-                  tick={{ fontSize: 12 }}
-                />
-                <YAxis stroke={themeStyles[theme].text} />
-                <Tooltip content={<CustomTooltip />} />
-                {getDataKeys("activeThreads_").map((key, index) => (
-                  <Area
-                    key={key}
-                    type="monotone"
-                    dataKey={key}
-                    stackId="1"
-                    stroke={COLORS[index % COLORS.length]}
-                    fill={COLORS[index % COLORS.length]}
-                    name={key.split('_')[1] === "Unknown" ? "Não identificado" : key.split('_')[1]}
-                  />
-                ))}
-                <Legend 
-                  wrapperStyle={{ paddingTop: "20px", fontSize: "14px" }}
-                  formatter={(value) => {
-                    const label = value === "Unknown" ? "Não identificado" : value;
-                    return <span style={{ color: themeStyles[theme].text }}>{label}</span>;
-                  }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+  <div style={{
+    backgroundColor: themeStyles[theme].cardBg,
+    padding: "15px",
+    borderRadius: "8px",
+    marginBottom: "20px"
+  }}>
+    <h3 style={{
+      color: theme === "dark" ? "#4E79A7" : "#1a5276",
+      textAlign: "center",
+      marginBottom: "15px"
+    }}>Ramp-up</h3>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)", // Ajustado para 3 colunas
+      gap: "20px",
+      marginBottom: "20px"
+    }}>
+      <div style={{
+        backgroundColor: themeStyles[theme].bg,
+        padding: "15px",
+        borderRadius: "5px",
+        textAlign: "center"
+      }}>
+        <p style={{ fontSize: "18px", margin: "0" }}>
+          <strong>Usuários Máximos (Total):</strong> {rampUpInfo.users}
+        </p>
+      </div>
+      <div style={{
+        backgroundColor: themeStyles[theme].bg,
+        padding: "15px",
+        borderRadius: "5px",
+        textAlign: "center"
+      }}>
+        <p style={{ fontSize: "18px", margin: "0" }}>
+          <strong>Usuários Máximos (Por Teste):</strong> {rampUpInfo.usersPerTest}
+        </p>
+      </div>
+      <div style={{
+        backgroundColor: themeStyles[theme].bg,
+        padding: "15px",
+        borderRadius: "5px",
+        textAlign: "center"
+      }}>
+        <p style={{ fontSize: "18px", margin: "0" }}>
+          <strong>Duração do Ramp-up:</strong> {rampUpInfo.duration}
+        </p>
+      </div>
+    </div>
+    <ResponsiveContainer width="100%" height={300}>
+      <AreaChart data={timeSeriesData}>
+        <CartesianGrid strokeDasharray="3 3" stroke={themeStyles[theme].gridStroke} />
+        <XAxis 
+          dataKey="time" 
+          stroke={themeStyles[theme].text}
+          tick={{ fontSize: 12 }}
+        />
+        <YAxis stroke={themeStyles[theme].text} />
+        <Tooltip content={<CustomTooltip />} />
+        {getDataKeys("activeThreads_").map((key, index) => (
+          <Area
+            key={key}
+            type="monotone"
+            dataKey={key}
+            stackId="1"
+            stroke={COLORS[index % COLORS.length]}
+            fill={COLORS[index % COLORS.length]}
+            name={key.split('_')[1] === "Unknown" ? "Não identificado" : key.split('_')[1]}
+          />
+        ))}
+        <Legend 
+          wrapperStyle={{ paddingTop: "20px", fontSize: "14px" }}
+          formatter={(value) => {
+            const label = value === "Unknown" ? "Não identificado" : value;
+            return <span style={{ color: themeStyles[theme].text }}>{label}</span>;
+          }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  </div>
+)}
 
         {shouldShow("throughput") && (
           <>
