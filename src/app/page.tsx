@@ -277,14 +277,14 @@ export default function PerformanceDashboard() {
             <span style={{ backgroundColor: "#E15759", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
               Mediana: {formatValueWithUnit(stats.median ?? 0, "time")}
             </span>
+            <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
+              Máximo: {formatValueWithUnit(stats.max ?? 0, "time")}
+            </span>
             <span style={{ backgroundColor: "#59A14F", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
               P90: {formatValueWithUnit(stats.p90 ?? 0, "time")}
             </span>
             <span style={{ backgroundColor: "#EDC948", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
               P95: {formatValueWithUnit(stats.p95 ?? 0, "time")}
-            </span>
-            <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
-              Máximo: {formatValueWithUnit(stats.max ?? 0, "time")}
             </span>
           </div>
         )}
@@ -502,14 +502,14 @@ export default function PerformanceDashboard() {
                   <span style={{ backgroundColor: "#E15759", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     Mediana: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.median, 0) / (aggregateReport.length || 1), "time")}
                   </span>
+                  <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
+                    Máximo: {formatValueWithUnit(Math.max(...aggregateReport.map(item => item.max)), "time")}
+                  </span>
                   <span style={{ backgroundColor: "#59A14F", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     P90: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.p90, 0) / (aggregateReport.length || 1), "time")}
                   </span>
                   <span style={{ backgroundColor: "#EDC948", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     P95: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.p95, 0) / (aggregateReport.length || 1), "time")}
-                  </span>
-                  <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
-                    Máximo: {formatValueWithUnit(Math.max(...aggregateReport.map(item => item.max)), "time")}
                   </span>
                 </div>
                 <ResponsiveContainer width="100%" height={300}>
@@ -550,14 +550,14 @@ export default function PerformanceDashboard() {
                   <span style={{ backgroundColor: "#E15759", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     Mediana: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.medianLatency, 0) / (aggregateReport.length || 1), "time")}
                   </span>
+                  <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
+                    Máximo: {formatValueWithUnit(Math.max(...aggregateReport.map(item => item.max)), "time")}
+                  </span>
                   <span style={{ backgroundColor: "#59A14F", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     P90: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.p90, 0) / (aggregateReport.length || 1), "time")}
                   </span>
                   <span style={{ backgroundColor: "#EDC948", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     P95: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.p95, 0) / (aggregateReport.length || 1), "time")}
-                  </span>
-                  <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
-                    Máximo: {formatValueWithUnit(Math.max(...aggregateReport.map(item => item.max)), "time")}
                   </span>
                 </div>
                 <ResponsiveContainer width="100%" height={300}>
