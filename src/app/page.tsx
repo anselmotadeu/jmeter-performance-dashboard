@@ -174,39 +174,6 @@ export default function PerformanceDashboard() {
     );
   };
 
-const calculateRealRampUpDuration = (data: any[]) => {
-  if (!data || data.length === 0) return "0s";
-
-  const activeThreadsKeys = Object.keys(data[0] || {}).filter(key => key.startsWith("activeThreads_"));
-  const testGroups = new Set(activeThreadsKeys.map(key => key.split('_')[1] || 'Default'));
-
-  let overallStart: number | null = null;
-  let overallEnd: number | null = null;
-
-  for (const test of Array.from(testGroups)) {
-    const testData = data.map(entry => ({
-      timeStamp: Number(entry.timeStamp),
-      activeThreads: Number(entry[`activeThreads_${test}`]) || 0
-    }));
-
-    const sortedData = testData.sort((a, b) => a.timeStamp - b.timeStamp);
-    const firstActive = sortedData.find(entry => entry.activeThreads > 0);
-    const lastActive = sortedData.slice().reverse().find(entry => entry.activeThreads > 0);
-
-    if (firstActive && lastActive) {
-      const start = firstActive.timeStamp;
-      const end = lastActive.timeStamp;
-      if (overallStart === null || start < overallStart) overallStart = start;
-      if (overallEnd === null || end > overallEnd) overallEnd = end;
-    }
-  }
-
-  if (overallStart && overallEnd) {
-    return formatDuration(overallEnd - overallStart);
-  }
-  return "0s";
-};
-
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -322,7 +289,7 @@ const calculateRealRampUpDuration = (data: any[]) => {
       setRampUpInfo({
         users: totalUsers,
         usersPerTest: Math.max(...maxPerTest, 0),
-        duration: calculateRealRampUpDuration(updatedTimeSeriesData)
+        duration: result.rampUpInfo.duration // Use backend-provided duration
       });
 
       setAggregateReport(result.aggregateReport);
@@ -717,7 +684,7 @@ const calculateRealRampUpDuration = (data: any[]) => {
                   <span style={{ backgroundColor: "#EDC948", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
                     P95: {formatValueWithUnit(aggregateReport.reduce((sum, item) => sum + item.p95, 0) / (aggregateReport.length || 1), "time")}
                   </span>
-                </div>
+                  </div>
                 <ResponsiveContainer width="100%" height={300}>
                   <ComposedChart data={timeSeriesData}>
                     <CartesianGrid strokeDasharray="3 3" stroke={themeStyles[theme].gridStroke} />
