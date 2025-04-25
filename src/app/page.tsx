@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend,
   PieChart, Pie, BarChart, Bar, AreaChart, Area, Cell, ComposedChart, Scatter,
-  ScatterChart
+  ScatterChart, ZAxis
 } from "recharts";
 
 const COLORS = [
@@ -30,7 +30,7 @@ type AggregateReportItem = {
 };
 
 export default function PerformanceDashboard() {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
   const [chartFilter, setChartFilter] = useState<string>("all");
   const [startTime, setStartTime] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
@@ -46,6 +46,27 @@ export default function PerformanceDashboard() {
   const [processingTime, setProcessingTime] = useState<number>(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
 
+  const calculateMedian = (values: number[]): number => {
+    if (!values.length) return 0;
+    const sortedValues = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sortedValues.length / 2);
+    return sortedValues.length % 2 === 0 
+      ? (sortedValues[middle - 1] + sortedValues[middle]) / 2 
+      : sortedValues[middle];
+  };
+
+  const parseCustomDate = (dateString: string): Date => {
+    const [datePart, timePart] = dateString.split(", ");
+    const [day, month, year] = datePart.split("/").map(Number);
+    const [hours, minutes, seconds] = timePart.split(":").map(Number);
+    const isoDateString = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    const parsedDate = new Date(isoDateString);
+    if (isNaN(parsedDate.getTime())) {
+      throw new Error(`Formato de data inválido: ${dateString}`);
+    }
+    return parsedDate;
+  };
+
   const formatProcessingTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
@@ -54,11 +75,11 @@ export default function PerformanceDashboard() {
 
   const themeStyles = {
     dark: {
-      bg: "#1a1a1a",
-      text: "#fff",
-      cardBg: "#2c2c2c",
+      bg: "#121212",
+      text: "#ffffff",
+      cardBg: "#1e1e1e",
       border: "#444",
-      gridStroke: "#444",
+      gridStroke: "#333",
       success: "#59A14F",
       error: "#E15759",
       areaFill: "rgba(89, 161, 79, 0.3)",
@@ -66,16 +87,16 @@ export default function PerformanceDashboard() {
       heatmap: ["#003087", "#21908d", "#5bc862", "#f7e11e", "#ff7e00", "#d62728"]
     },
     light: {
-      bg: "#f5f5f5",
-      text: "#333",
-      cardBg: "#fff",
-      border: "#ddd",
-      gridStroke: "#eee",
+      bg: "#ffffff",
+      text: "#333333",
+      cardBg: "#f9f9f9",
+      border: "#e0e0e0",
+      gridStroke: "#eeeeee",
       success: "#388E3C",
       error: "#D32F2F",
-      areaFill: "rgba(56, 142, 60, 0.3)",
+      areaFill: "rgba(56, 142, 60, 0.2)",
       lineStroke: "#388E3C",
-      heatmap: ["#e6f0ff", "#b3d9ff", "#80bfff", "#ffcc99", "#ff9966", "#ff3333"]
+      heatmap: ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"]
     }
   };
 
@@ -153,6 +174,39 @@ export default function PerformanceDashboard() {
     );
   };
 
+const calculateRealRampUpDuration = (data: any[]) => {
+  if (!data || data.length === 0) return "0s";
+
+  const activeThreadsKeys = Object.keys(data[0] || {}).filter(key => key.startsWith("activeThreads_"));
+  const testGroups = new Set(activeThreadsKeys.map(key => key.split('_')[1] || 'Default'));
+
+  let overallStart: number | null = null;
+  let overallEnd: number | null = null;
+
+  for (const test of Array.from(testGroups)) {
+    const testData = data.map(entry => ({
+      timeStamp: Number(entry.timeStamp),
+      activeThreads: Number(entry[`activeThreads_${test}`]) || 0
+    }));
+
+    const sortedData = testData.sort((a, b) => a.timeStamp - b.timeStamp);
+    const firstActive = sortedData.find(entry => entry.activeThreads > 0);
+    const lastActive = sortedData.slice().reverse().find(entry => entry.activeThreads > 0);
+
+    if (firstActive && lastActive) {
+      const start = firstActive.timeStamp;
+      const end = lastActive.timeStamp;
+      if (overallStart === null || start < overallStart) overallStart = start;
+      if (overallEnd === null || end > overallEnd) overallEnd = end;
+    }
+  }
+
+  if (overallStart && overallEnd) {
+    return formatDuration(overallEnd - overallStart);
+  }
+  return "0s";
+};
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -197,22 +251,78 @@ export default function PerformanceDashboard() {
 
       const updatedTimeSeriesData = result.timeSeriesData.map((entry: any) => {
         const activeThreadsKeys = Object.keys(entry).filter(key => key.startsWith("activeThreads_"));
-        let totalActiveThreads = 0;
+        const requestKeys = Object.keys(entry).filter(key => key.startsWith("requestsPerSecond_"));
+        const checkKeys = Object.keys(entry).filter(key => key.startsWith("checksPerSecond_"));
+        const errorKeys = Object.keys(entry).filter(key => key.startsWith("errorsPerSecond_"));
+        const elapsedKeys = Object.keys(entry).filter(key => key.startsWith("elapsed_"));
+        const latencyKeys = Object.keys(entry).filter(key => key.startsWith("latency_"));
+
+        let time = entry.time;
+        if (!time && entry.timeStamp && !isNaN(Number(entry.timeStamp))) {
+          try {
+            const date = new Date(Number(entry.timeStamp));
+            if (!isNaN(date.getTime())) {
+              time = date.toISOString().substring(11, 19);
+            }
+          } catch (e) {
+            console.error("Erro ao converter timeStamp:", entry.timeStamp, e);
+            time = "00:00:00";
+          }
+        }
+
+        const testData: any = { time, timeStamp: Number(entry.timeStamp) };
         activeThreadsKeys.forEach(key => {
-          totalActiveThreads += entry[key] || 0;
+          testData[key] = Number(entry[key]) || 0;
         });
-        return { ...entry, totalActiveThreads };
+        requestKeys.forEach(key => {
+          testData[key] = Number(entry[key]) || 0;
+        });
+        checkKeys.forEach(key => {
+          testData[key] = Number(entry[key]) || 0;
+        });
+        errorKeys.forEach(key => {
+          testData[key] = Number(entry[key]) || 0;
+        });
+        elapsedKeys.forEach(key => {
+          testData[key] = Number(entry[key]) || 0;
+        });
+        latencyKeys.forEach(key => {
+          testData[key] = Number(entry[key]) || 0;
+        });
+
+        testData.totalActiveThreads = activeThreadsKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
+        testData.totalRequestsPerSecond = requestKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
+        testData.totalChecksPerSecond = checkKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
+        testData.totalErrorsPerSecond = errorKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
+
+        return testData;
       });
 
-      const maxTotalUsers = Math.max(...updatedTimeSeriesData.map((entry: any) => entry.totalActiveThreads));
       const activeThreadsKeys = Object.keys(result.timeSeriesData[0] || {}).filter(key => key.startsWith("activeThreads_"));
-      const tests = Array.from(new Set(activeThreadsKeys.map(key => key.split('_')[1])));
-      const maxUsersPerTest = tests.length > 0 ? Math.round(maxTotalUsers / tests.length) : 0;
+      const testGroups = new Set(activeThreadsKeys.map(key => {
+        const parts = key.split('_');
+        return parts.length > 1 ? parts[1] : 'Default';
+      }));
+
+      const maxPerTest = Array.from(testGroups).map(test => {
+        const testKeys = activeThreadsKeys.filter(key => key.includes(`_${test}`));
+        return Math.max(...updatedTimeSeriesData.map((entry: any) => 
+          testKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0)
+        ));
+      });
+
+      const totalUsers = Array.from(testGroups).reduce((sum, test) => {
+        const testKeys = activeThreadsKeys.filter(key => key.includes(`_${test}`));
+        const maxForTest = Math.max(...updatedTimeSeriesData.map((entry: any) => 
+          testKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0)
+        ));
+        return sum + maxForTest;
+      }, 0);
 
       setRampUpInfo({
-        users: maxTotalUsers,
-        usersPerTest: maxUsersPerTest,
-        duration: result.rampUpInfo.duration
+        users: totalUsers,
+        usersPerTest: Math.max(...maxPerTest, 0),
+        duration: calculateRealRampUpDuration(updatedTimeSeriesData)
       });
 
       setAggregateReport(result.aggregateReport);
@@ -230,7 +340,7 @@ export default function PerformanceDashboard() {
 
   const calculateStats = (data: any[], dataKeys: string[]) => {
     const values: number[] = data
-      .flatMap(entry => dataKeys.map(key => entry[key] || 0))
+      .flatMap(entry => dataKeys.map(key => Number(entry[key]) || 0))
       .filter(val => val !== undefined && !isNaN(val) && val !== 0);
 
     if (!values.length) {
@@ -262,6 +372,15 @@ export default function PerformanceDashboard() {
 
     const stats = summary || calculateStats(data, dataKeys);
     const maxValue = stats.max || 10;
+
+    if (!data || data.length === 0 || !dataKeys || dataKeys.length === 0) {
+      return (
+        <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", textAlign: "center" }}>
+          <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276" }}>{title}</h3>
+          <p>Nenhum dado disponível para exibir o gráfico.</p>
+        </div>
+      );
+    }
 
     return (
       <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", boxShadow: "0px 2px 5px rgba(0,0,0,0.1)" }}>
@@ -299,11 +418,17 @@ export default function PerformanceDashboard() {
             />
             <Tooltip content={<CustomTooltip />} />
             {chartType === "composed" ? (
-              <>
-                <Area type="monotone" dataKey={dataKeys[0]} stroke={themeStyles[theme].lineStroke} fill={themeStyles[theme].areaFill} name="Média" />
-                <Line type="monotone" dataKey={dataKeys[1]} stroke={COLORS[4]} strokeWidth={1} dot={false} name="P90" />
-                <Line type="monotone" dataKey={dataKeys[2]} stroke={COLORS[5]} strokeWidth={1} dot={false} name="P95" />
-              </>
+              dataKeys.map((key, index) => (
+                <Line
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={COLORS[index % COLORS.length]}
+                  strokeWidth={2}
+                  dot={false}
+                  name={`Teste ${key.split('_')[1] || 'Desconhecido'}`}
+                />
+              ))
             ) : (
               dataKeys.map((key, index) => (
                 <DataComponent
@@ -312,9 +437,10 @@ export default function PerformanceDashboard() {
                   dataKey={key}
                   stroke={COLORS[index % COLORS.length]}
                   fill={COLORS[index % COLORS.length]}
+                  fillOpacity={0.6}
                   strokeWidth={2}
                   activeDot={{ r: 6 }}
-                  name={key.split('_')[1] === "Unknown" ? "Não identificado" : key.split('_')[1]}
+                  name={`Teste ${key.split('_')[1] || 'Desconhecido'}`}
                 />
               ))
             )}
@@ -326,89 +452,154 @@ export default function PerformanceDashboard() {
   };
 
   const HeatmapChart = ({ data, dataKey, title }: { data: any[]; dataKey: string; title: string }) => {
-    const binData = () => {
-      const bins: { [key: string]: number } = {};
-      const timeStep = 1000; // 1 segundo
-      const valueStep = 50; // 50ms por bin
-      const baseDate = startTime ? new Date(startTime) : new Date();
-      const baseDateString = baseDate.toISOString().split('T')[0];
-
+    const generateHeatmapData = () => {
+      if (!data.length) return [];
+      
+      const timeStep = 60000;
+      const valueStep = 100;
+      
+      const bins: { [key: string]: { value: number; count: number } } = {};
+      
       data.forEach(entry => {
-        if (!entry.time || !entry[dataKey]) return;
-        let timeString = entry.time;
-        if (!timeString.includes('T')) {
-          timeString = `${baseDateString}T${timeString}`;
+        const value = Number(entry[dataKey]);
+        if (isNaN(value)) return;
+        
+        let timestamp;
+        if (entry.timeStamp) {
+          timestamp = new Date(Number(entry.timeStamp)).getTime();
+        } else if (entry.time) {
+          const [hours, minutes, seconds] = entry.time.split(':').map(Number);
+          const date = new Date();
+          date.setHours(hours, minutes, seconds, 0);
+          timestamp = date.getTime();
+        } else {
+          return;
         }
-        const time = new Date(timeString).getTime();
-        if (isNaN(time)) return;
-        const value = entry[dataKey];
-        const timeBin = Math.floor(time / timeStep) * timeStep;
+        
+        const timeBin = Math.floor(timestamp / timeStep) * timeStep;
         const valueBin = Math.floor(value / valueStep) * valueStep;
         const key = `${timeBin}_${valueBin}`;
-        bins[key] = (bins[key] || 0) + 1;
+        
+        if (!bins[key]) {
+          bins[key] = { value: valueBin, count: 0 };
+        }
+        bins[key].count += 1;
       });
-
-      return Object.entries(bins).map(([key, count]) => {
-        const [time, value] = key.split('_').map(Number);
-        const formattedTime = new Date(time);
-        if (isNaN(formattedTime.getTime())) return null;
-        return { time: formattedTime.toISOString().substring(11, 19), value, count };
-      }).filter(item => item !== null);
+      
+      return Object.entries(bins).map(([key, bin]) => {
+        const timeBin = Number(key.split('_')[0]);
+        return {
+          time: new Date(timeBin).toLocaleTimeString(),
+          value: bin.value,
+          count: bin.count,
+          formattedValue: formatValueWithUnit(bin.value, "time")
+        };
+      });
     };
-
-    const binnedData = binData();
-    const maxCount = Math.max(...binnedData.map(d => d.count), 1);
-    const stats = {
-      max: Math.max(...binnedData.map(d => d.value)),
-      min: Math.min(...binnedData.map(d => d.value)),
-      avg: binnedData.reduce((sum, d) => sum + d.value, 0) / binnedData.length,
-    };
-
-    if (!binnedData.length) {
+  
+    const heatmapData = generateHeatmapData();
+    const maxCount = Math.max(...heatmapData.map(d => d.count), 1);
+    
+    if (!heatmapData.length) {
       return (
-        <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", boxShadow: "0px 2px 5px rgba(0,0,0,0.1)", textAlign: "center", color: themeStyles[theme].text }}>
-          <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", marginBottom: "15px" }}>{title} (Heatmap)</h3>
+        <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", textAlign: "center" }}>
+          <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276" }}>{title} (Heatmap)</h3>
           <p>Nenhum dado disponível para exibir o heatmap.</p>
         </div>
       );
     }
-
+  
     return (
-      <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", boxShadow: "0px 2px 5px rgba(0,0,0,0.1)" }}>
-        <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", textAlign: "center", marginBottom: "10px" }}>{title} (Heatmap)</h3>
-        <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "10px", flexWrap: "nowrap", overflowX: "auto" }}>
-          <span style={{ backgroundColor: "#F28E2B", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
-            Mínimo: {formatValueWithUnit(stats.min, "time")}
-          </span>
-          <span style={{ backgroundColor: "#E15759", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
-            Média: {formatValueWithUnit(stats.avg, "time")}
+      <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px" }}>
+        <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", textAlign: "center" }}>{title} (Heatmap)</h3>
+        <div style={{ display: "flex", justifyContent: "space-around", margin: "10px 0" }}>
+          <span style={{ backgroundColor: "#76B7B2", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
+            Mínimo: {formatValueWithUnit(Math.min(...heatmapData.map(d => d.value)), "time")}
           </span>
           <span style={{ backgroundColor: "#4E79A7", color: "white", padding: "5px 10px", borderRadius: "5px" }}>
-            Máximo: {formatValueWithUnit(stats.max, "time")}
+            Máximo: {formatValueWithUnit(Math.max(...heatmapData.map(d => d.value)), "time")}
           </span>
         </div>
-        <ResponsiveContainer width="100%" height={300}>
-          <ScatterChart data={binnedData}>
+        <ResponsiveContainer width="100%" height={400}>
+          <ScatterChart
+            data={heatmapData}
+            margin={{ top: 20, right: 20, bottom: 30, left: 60 }}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke={themeStyles[theme].gridStroke} />
-            <XAxis dataKey="time" stroke={themeStyles[theme].text} tick={{ fontSize: 12 }} />
-            <YAxis dataKey="value" stroke={themeStyles[theme].text} tickFormatter={(value) => formatValueWithUnit(value, "time")} domain={[0, stats.max * 1.1]} />
-            <Tooltip content={<HeatmapTooltip />} />
-            <Scatter dataKey="count" shape="square">
-              {binnedData.map((entry, index) => {
-                const intensity = entry.count / maxCount;
+            <XAxis 
+              dataKey="time" 
+              name="Tempo" 
+              stroke={themeStyles[theme].text}
+              tickFormatter={(value) => value.split(':').slice(0, 2).join(':')}
+            />
+            <YAxis 
+              dataKey="value" 
+              name="Duração" 
+              stroke={themeStyles[theme].text}
+              tickFormatter={(value) => formatValueWithUnit(value, "time")}
+            />
+            <ZAxis dataKey="count" range={[0, 500]} name="Ocorrências" />
+            <Tooltip 
+              content={({ active, payload }) => {
+                if (!active || !payload || !payload.length) return null;
+                const data = payload[0].payload;
+                return (
+                  <div style={{
+                    background: themeStyles[theme].cardBg,
+                    padding: "10px",
+                    border: `1px solid ${themeStyles[theme].border}`,
+                    borderRadius: "5px"
+                  }}>
+                    <p style={{ margin: 0, fontWeight: "bold" }}>Horário: {data.time}</p>
+                    <p style={{ margin: "5px 0 0 0" }}>Duração: {data.formattedValue}</p>
+                    <p style={{ margin: "5px 0 0 0" }}>Ocorrências: {data.count}</p>
+                  </div>
+                );
+              }}
+            />
+            <Scatter
+              name="Heatmap"
+              data={heatmapData}
+              fill="#8884d8"
+              shape="square"
+            >
+              {heatmapData.map((entry, index) => {
+                const intensity = Math.min(entry.count / maxCount, 1);
                 const colorIndex = Math.floor(intensity * (themeStyles[theme].heatmap.length - 1));
-                return <Cell key={`cell-${index}`} fill={themeStyles[theme].heatmap[colorIndex]} />;
+                return (
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={themeStyles[theme].heatmap[colorIndex]} 
+                    width={20}
+                    height={20}
+                  />
+                );
               })}
             </Scatter>
           </ScatterChart>
         </ResponsiveContainer>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px" }}>
-          <span>Intensidade: </span>
-          <div style={{ display: "flex", gap: "5px" }}>
-            {themeStyles[theme].heatmap.map((color, index) => (
-              <div key={index} style={{ width: "20px", height: "10px", backgroundColor: color }} />
-            ))}
-            <span>[0 - {maxCount}]</span>
+        <div style={{ display: "flex", justifyContent: "center", marginTop: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <span style={{ marginRight: "10px" }}>Intensidade:</span>
+            <div style={{ display: "flex" }}>
+              {themeStyles[theme].heatmap.map((color, i) => (
+                <div 
+                  key={i} 
+                  style={{
+                    width: "20px", 
+                    height: "20px", 
+                    backgroundColor: color,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "10px",
+                    color: i > themeStyles[theme].heatmap.length / 2 ? "white" : "black"
+                  }}
+                >
+                  {i === 0 ? "0" : i === themeStyles[theme].heatmap.length - 1 ? maxCount : ""}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -430,7 +621,7 @@ export default function PerformanceDashboard() {
       );
     }
 
-    if (!startTime && !endTime) {
+    if (!startTime || !endTime) {
       return (
         <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "20px", borderRadius: "8px", textAlign: "center", color: themeStyles[theme].text }}>
           {errorMessage || "Nenhum dado carregado. Faça upload de um arquivo JTL."}
@@ -439,7 +630,16 @@ export default function PerformanceDashboard() {
     }
 
     const shouldShow = (type: string) => chartFilter === "all" || chartFilter === type;
-    const getDataKeys = (prefix: string) => Object.keys(timeSeriesData[0] || {}).filter(key => key.startsWith(prefix));
+    const getDataKeys = (prefix: string) => {
+      const keys = Object.keys(timeSeriesData[0] || {}).filter(key => key.startsWith(prefix));
+      return keys;
+    };
+
+    const requestsKeys = getDataKeys("requestsPerSecond_");
+    const checksKeys = getDataKeys("checksPerSecond_");
+    const errorsKeys = getDataKeys("errorsPerSecond_");
+    const elapsedKeys = getDataKeys("elapsed_");
+    const latencyKeys = getDataKeys("latency_");
 
     return (
       <>
@@ -448,13 +648,19 @@ export default function PerformanceDashboard() {
             <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", textAlign: "center", marginBottom: "15px" }}>Ramp-up</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", marginBottom: "20px" }}>
               <div style={{ backgroundColor: themeStyles[theme].bg, padding: "15px", borderRadius: "5px", textAlign: "center" }}>
-                <p style={{ fontSize: "18px", margin: "0" }}><strong>Usuários Máximos (Total):</strong> {rampUpInfo.users}</p>
+                <p style={{ fontSize: "18px", margin: "0" }}>
+                  <strong title="Soma de todos os usuários em todos os testes simultâneos">Usuários Máximos (Total):</strong> {rampUpInfo.users}
+                </p>
               </div>
               <div style={{ backgroundColor: themeStyles[theme].bg, padding: "15px", borderRadius: "5px", textAlign: "center" }}>
-                <p style={{ fontSize: "18px", margin: "0" }}><strong>Usuários Máximos (Por Teste):</strong> {rampUpInfo.usersPerTest}</p>
+                <p style={{ fontSize: "18px", margin: "0" }}>
+                  <strong title="Máximo de usuários em um único teste durante a execução">Usuários Máximos (Por Teste):</strong> {rampUpInfo.usersPerTest}
+                </p>
               </div>
               <div style={{ backgroundColor: themeStyles[theme].bg, padding: "15px", borderRadius: "5px", textAlign: "center" }}>
-                <p style={{ fontSize: "18px", margin: "0" }}><strong>Duração do Ramp-up:</strong> {rampUpInfo.duration}</p>
+                <p style={{ fontSize: "18px", margin: "0" }}>
+                  <strong>Duração do Ramp-up:</strong> {rampUpInfo.duration}
+                </p>
               </div>
             </div>
             <ResponsiveContainer width="100%" height={300}>
@@ -474,13 +680,13 @@ export default function PerformanceDashboard() {
           <>
             <SimplifiedChart
               data={timeSeriesData}
-              dataKeys={getDataKeys("requestsPerSecond_")}
+              dataKeys={requestsKeys}
               title="Requests per Second"
               chartType="area"
             />
             <SimplifiedChart
               data={timeSeriesData}
-              dataKeys={getDataKeys("checksPerSecond_")}
+              dataKeys={checksKeys}
               title="Checks per Second"
               chartType="area"
             />
@@ -513,27 +719,29 @@ export default function PerformanceDashboard() {
                   </span>
                 </div>
                 <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={timeSeriesData.map(entry => {
-                    const elapsedKeys = getDataKeys("elapsed_").filter(key => !key.includes("Min") && !key.includes("Max"));
-                    const avg = elapsedKeys.reduce((sum, key) => sum + (entry[key] || 0), 0) / (elapsedKeys.length || 1);
-                    const p90 = elapsedKeys.length ? entry[elapsedKeys[0]] : 0;
-                    const p95 = elapsedKeys.length ? entry[elapsedKeys[0]] : 0;
-                    return { time: entry.time, avg, p90, p95 };
-                  })}>
+                  <ComposedChart data={timeSeriesData}>
                     <CartesianGrid strokeDasharray="3 3" stroke={themeStyles[theme].gridStroke} />
                     <XAxis dataKey="time" stroke={themeStyles[theme].text} tick={{ fontSize: 12 }} />
                     <YAxis stroke={themeStyles[theme].text} tickFormatter={(value) => formatValueWithUnit(value, "time")} domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]} />
                     <Tooltip content={<CustomTooltip />} />
-                    <Area type="monotone" dataKey="avg" stroke={themeStyles[theme].lineStroke} fill={themeStyles[theme].areaFill} name="Média" />
-                    <Line type="monotone" dataKey="p90" stroke={COLORS[4]} strokeWidth={1} dot={false} name="P90" />
-                    <Line type="monotone" dataKey="p95" stroke={COLORS[5]} strokeWidth={1} dot={false} name="P95" />
+                    {elapsedKeys.map((key, index) => (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        stroke={COLORS[index % COLORS.length]}
+                        strokeWidth={2}
+                        dot={false}
+                        name={`Teste ${key.split('_')[1] || 'Desconhecido'}`}
+                      />
+                    ))}
                     <Legend wrapperStyle={{ paddingTop: "20px", fontSize: "14px" }} formatter={(value) => <span style={{ color: themeStyles[theme].text }}>{value}</span>} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
               <HeatmapChart
                 data={timeSeriesData}
-                dataKey={getDataKeys("elapsed_")[0] || ""}
+                dataKey={elapsedKeys[0] || ""}
                 title="Response Time"
               />
             </div>
@@ -561,27 +769,29 @@ export default function PerformanceDashboard() {
                   </span>
                 </div>
                 <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={timeSeriesData.map(entry => {
-                    const latencyKeys = getDataKeys("latency_");
-                    const avg = latencyKeys.reduce((sum, key) => sum + (entry[key] || 0), 0) / (latencyKeys.length || 1);
-                    const p90 = latencyKeys.length ? entry[latencyKeys[0]] : 0;
-                    const p95 = latencyKeys.length ? entry[latencyKeys[0]] : 0;
-                    return { time: entry.time, avg, p90, p95 };
-                  })}>
+                  <ComposedChart data={timeSeriesData}>
                     <CartesianGrid strokeDasharray="3 3" stroke={themeStyles[theme].gridStroke} />
                     <XAxis dataKey="time" stroke={themeStyles[theme].text} tick={{ fontSize: 12 }} />
                     <YAxis stroke={themeStyles[theme].text} tickFormatter={(value) => formatValueWithUnit(value, "time")} domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]} />
                     <Tooltip content={<CustomTooltip />} />
-                    <Area type="monotone" dataKey="avg" stroke={themeStyles[theme].lineStroke} fill={themeStyles[theme].areaFill} name="Média" />
-                    <Line type="monotone" dataKey="p90" stroke={COLORS[4]} strokeWidth={1} dot={false} name="P90" />
-                    <Line type="monotone" dataKey="p95" stroke={COLORS[5]} strokeWidth={1} dot={false} name="P95" />
+                    {latencyKeys.map((key, index) => (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        stroke={COLORS[index % COLORS.length]}
+                        strokeWidth={2}
+                        dot={false}
+                        name={`Teste ${key.split('_')[1] || 'Desconhecido'}`}
+                      />
+                    ))}
                     <Legend wrapperStyle={{ paddingTop: "20px", fontSize: "14px" }} formatter={(value) => <span style={{ color: themeStyles[theme].text }}>{value}</span>} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
               <HeatmapChart
                 data={timeSeriesData}
-                dataKey={getDataKeys("latency_")[0] || ""}
+                dataKey={latencyKeys[0] || ""}
                 title="Latency"
               />
             </div>
@@ -591,9 +801,15 @@ export default function PerformanceDashboard() {
         {shouldShow("errors") && (
           <SimplifiedChart
             data={timeSeriesData}
-            dataKeys={getDataKeys("errorsPerSecond_")}
+            dataKeys={errorsKeys}
             title="Errors per Second"
             chartType="area"
+            summary={{
+              avg: errorCount / (timeSeriesData.length || 1),
+              max: Math.max(...timeSeriesData.map(e => e.totalErrorsPerSecond || 0)),
+              min: Math.min(...timeSeriesData.map(e => e.totalErrorsPerSecond > 0 ? e.totalErrorsPerSecond : Infinity)),
+              median: calculateMedian(timeSeriesData.map(e => e.totalErrorsPerSecond || 0))
+            }}
           />
         )}
 
@@ -711,7 +927,7 @@ export default function PerformanceDashboard() {
       <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "20px", borderRadius: "8px", boxShadow: "0px 0px 10px rgba(0, 0, 0, 0.1)", marginBottom: "20px" }}>
         <label style={{ display: "inline-block", padding: "10px 20px", backgroundColor: theme === "dark" ? "#4E79A7" : "#1a5276", color: "white", textAlign: "center", cursor: "pointer", borderRadius: "5px", fontSize: "16px", marginBottom: "20px" }}>
           📂 Escolher Arquivo JTL
-          <input type="file" accept=".csv,.jtl" onChange={handleFileUpload} style={{ display: "none" }} />
+          <input type="file" accept=".csv,.jtl" onChange={handleFileUpload} multiple style={{ display: "none" }} />
         </label>
 
         {fileSizeWarning && (
@@ -733,7 +949,7 @@ export default function PerformanceDashboard() {
                 <p><strong>Fim:</strong> {endTime}</p>
               </div>
               <div style={{ backgroundColor: themeStyles[theme].bg, padding: "15px", borderRadius: "5px" }}>
-                <p><strong>Duração Total:</strong> {formatDuration(new Date(endTime).getTime() - new Date(startTime).getTime())}</p>
+                <p><strong>Duração Total:</strong> {formatDuration(parseCustomDate(endTime).getTime() - parseCustomDate(startTime).getTime())}</p>
               </div>
               <div style={{ backgroundColor: themeStyles[theme].bg, padding: "15px", borderRadius: "5px" }}>
                 <p><strong>Status:</strong> <span><span style={{ color: themeStyles[theme].success }}>{successCount} sucesso(s)</span>, <span style={{ color: themeStyles[theme].error }}>{errorCount} erro(s)</span></span></p>
@@ -747,44 +963,57 @@ export default function PerformanceDashboard() {
             <h3 style={{ color: "#E15759", borderBottom: "2px solid #E15759", paddingBottom: "5px" }}>
               🚨 Detalhes de Erros
             </h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "10px", marginTop: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px", marginTop: "10px", maxHeight: "200px", overflowY: "auto" }}>
               {errorDetails.map((error, index) => (
-                <div key={index} style={{ backgroundColor: themeStyles[theme].bg, padding: "10px", borderRadius: "5px" }}>
-                  <strong>{error.code}: {error.message}</strong> - {error.count} ocorrência(s)
+                <div key={index} style={{
+                  backgroundColor: themeStyles[theme].bg,
+                  padding: "15px",
+                  borderRadius: "5px",
+                  borderLeft: `4px solid ${themeStyles[theme].error}`
+                }}>
+                  <div style={{ marginBottom: "5px" }}>
+                    <strong style={{ color: themeStyles[theme].error }}>Código:</strong> {error.code}
+                  </div>
+                  <div style={{ marginBottom: "5px" }}>
+                    <strong style={{ color: themeStyles[theme].error }}>Mensagem:</strong> {error.message}
+                  </div>
+                  <div>
+                    <strong style={{ color: themeStyles[theme].error }}>Ocorrências:</strong> {error.count}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
-      </div>
 
-      <div style={{ margin: "20px 0", textAlign: "center", padding: "10px", backgroundColor: themeStyles[theme].cardBg, borderRadius: "8px" }}>
-        <label style={{ marginRight: "10px", color: themeStyles[theme].text, fontWeight: "bold" }}>
-          Filtrar Gráficos:
-        </label>
-        <select
-          value={chartFilter}
-          onChange={(e) => setChartFilter(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            borderRadius: "5px",
-            border: `1px solid ${themeStyles[theme].border}`,
-            backgroundColor: themeStyles[theme].cardBg,
-            color: themeStyles[theme].text,
-            cursor: "pointer"
-          }}
-        >
-          <option value="all">Todos os Gráficos</option>
-          <option value="ramp-up">Ramp-up</option>
-          <option value="throughput">Throughput</option>
-          <option value="response-times">Tempos de Resposta</option>
-          <option value="errors">Erros</option>
-          <option value="aggregate">Relatório Agregado</option>
-          <option value="success">Sucesso vs. Erro</option>
-        </select>
-      </div>
+        <div style={{ margin: "20px 0", textAlign: "center", padding: "10px", backgroundColor: themeStyles[theme].cardBg, borderRadius: "8px" }}>
+          <label style={{ marginRight: "10px", color: themeStyles[theme].text, fontWeight: "bold" }}>
+            Filtrar Gráficos:
+          </label>
+          <select
+            value={chartFilter}
+            onChange={(e) => setChartFilter(e.target.value)}
+            style={{
+              padding: "8px 12px",
+              borderRadius: "5px",
+              border: `1px solid ${themeStyles[theme].border}`,
+              backgroundColor: themeStyles[theme].cardBg,
+              color: themeStyles[theme].text,
+              cursor: "pointer"
+            }}
+          >
+            <option value="all">Todos os Gráficos</option>
+            <option value="ramp-up">Ramp-up</option>
+            <option value="throughput">Throughput</option>
+            <option value="response-times">Tempos de Resposta</option>
+            <option value="errors">Erros</option>
+            <option value="aggregate">Relatório Agregado</option>
+            <option value="success">Sucesso vs. Erro</option>
+          </select>
+        </div>
 
-      {renderCharts()}
+        {renderCharts()}
+      </div>
     </div>
   );
 }

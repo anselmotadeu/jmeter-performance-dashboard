@@ -73,9 +73,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Nenhum arquivo enviado." }, { status: 400 });
     }
 
-    const stream = file.stream();
-    const reader = stream.getReader();
-    let csvData: TestData[] = [];
     let successCount = 0;
     let errorCount = 0;
     let startTime = "";
@@ -83,7 +80,6 @@ export async function POST(request: NextRequest) {
     let minTime = Infinity;
     let maxTime = -Infinity;
 
-    // Estruturas para cálculo incremental
     const grouped: Record<string, any> = {};
     const timeSeries: Record<number, any> = {};
     const intervalMs = 1000;
@@ -92,11 +88,6 @@ export async function POST(request: NextRequest) {
     const threadsByTimestamp: Record<number, Record<string, number>> = {};
     const allErrorDetails: Record<string, number> = {};
 
-    // Processar o arquivo em streaming
-    let csvString = "";
-    let processedLines = 0;
-    let totalLines = 0;
-
     await new Promise<void>(async (resolve, reject) => {
       const fileContent = await file.text();
       parse(fileContent, {
@@ -104,10 +95,6 @@ export async function POST(request: NextRequest) {
         skipEmptyLines: true,
         step: (results: any, parser: any) => {
           const row = results.data as TestData;
-          processedLines++;
-          totalLines++;
-
-          // Converter e validar os dados
           const timeStamp = Number(row.timeStamp);
           if (!timeStamp || isNaN(timeStamp)) return;
 
@@ -124,15 +111,12 @@ export async function POST(request: NextRequest) {
             responseMessage: row.responseMessage,
           };
 
-          // Atualizar startTime e endTime
           minTime = Math.min(minTime, timeStamp);
           maxTime = Math.max(maxTime, timeStamp);
 
-          // Contagem de sucessos e erros
           if (validRow.success === "true") successCount++;
           else errorCount++;
 
-          // Cálculo do Aggregate Report
           const label = validRow.label;
           if (!grouped[label]) {
             grouped[label] = {
@@ -162,7 +146,6 @@ export async function POST(request: NextRequest) {
           grouped[label].responseTimes.push(elapsed);
           grouped[label].latencyTimes.push(latency);
 
-          // Cálculo do Time Series
           const timestamp = Math.floor(timeStamp / intervalMs) * intervalMs;
           labelsSet.add(label);
           if (!timeSeries[timestamp]) {
@@ -199,7 +182,6 @@ export async function POST(request: NextRequest) {
           timeSeries[timestamp][`latency_${label}`] = validRow.Latency;
           if (validRow.success === "true") timeSeries[timestamp][`checksPerSecond_${label}`] += 1;
 
-          // Cálculo do Ramp-up
           if (validRow.allThreads > 0) {
             if (!threadsByTimestamp[timeStamp]) {
               threadsByTimestamp[timeStamp] = {};
@@ -216,7 +198,6 @@ export async function POST(request: NextRequest) {
       });
     });
 
-    // Finalizar Aggregate Report
     const durationSeconds = (maxTime - minTime) / 1000;
     const aggregateReport = Object.values(grouped).map((item: any) => {
       item.responseTimes.sort((a: number, b: number) => a - b);
@@ -247,22 +228,33 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    // Finalizar Time Series
     const labels = Array.from(labelsSet);
     const seriesData = Object.values(timeSeries)
-      .map((item: any) => ({
-        ...item,
-        time: new Date(item.time).toLocaleTimeString("pt-BR", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-        originalTime: item.time,
-      }))
+      .map((item: any) => {
+        const entry: any = {
+          time: new Date(item.time).toLocaleTimeString("pt-BR", {
+            hour12: false,
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+          originalTime: item.time,
+        };
+        labels.forEach(label => {
+          entry[`requestsPerSecond_${label}`] = item[`requestsPerSecond_${label}`] || 0;
+          entry[`errorsPerSecond_${label}`] = item[`errorsPerSecond_${label}`] || 0;
+          entry[`activeThreads_${label}`] = item[`activeThreads_${label}`] || 0;
+          entry[`bytes_${label}`] = item[`bytes_${label}`] || 0;
+          entry[`sentBytes_${label}`] = item[`sentBytes_${label}`] || 0;
+          entry[`elapsed_${label}`] = item[`elapsed_${label}`] || 0;
+          entry[`latency_${label}`] = item[`latency_${label}`] || 0;
+          entry[`checksPerSecond_${label}`] = item[`checksPerSecond_${label}`] || 0;
+          entry[`errorDetails_${label}`] = item[`errorDetails_${label}`] || {};
+        });
+        return entry;
+      })
       .sort((a: any, b: any) => a.originalTime - b.originalTime);
 
-    // Finalizar Error Details
     const errorDetails = Object.entries(allErrorDetails).map(([message, count]: [string, number]) => {
       const [code, ...msgParts] = message.split(": ");
       return {
@@ -272,31 +264,62 @@ export async function POST(request: NextRequest) {
       };
     }).sort((a, b) => b.count - a.count);
 
-    // Calcular Ramp-up
     let maxUsers = 0;
-    let maxUsersPerTest = Math.max(...Object.values(threadsByLabel));
-    let rampStart = minTime;
-    let rampEnd = rampStart;
+let maxUsersPerTest = Math.max(...Object.values(threadsByLabel));
+//let rampStart = null;
+//let rampEnd = null;
 
-    Object.entries(threadsByTimestamp).forEach(([timestamp, threadsByLabel]) => {
-      const totalThreadsAtTimestamp = Object.values(threadsByLabel).reduce(
-        (sum, threads) => sum + threads,
-        0
-      );
-      if (totalThreadsAtTimestamp > maxUsers) {
-        maxUsers = totalThreadsAtTimestamp;
-        rampEnd = Number(timestamp);
-      }
-    });
+const sortedTimestamps = Object.keys(threadsByTimestamp)
+  .map(ts => Number(ts))
+  .sort((a, b) => a - b);
 
-    const durationMs = rampEnd - rampStart;
-    const rampUpInfo = {
-      users: maxUsers,
-      usersPerTest: maxUsersPerTest,
-      duration: formatDuration(durationMs),
-    };
+// Primeiro, encontre o valor máximo de usuários
+sortedTimestamps.forEach(timestamp => {
+  const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
+  const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
+    (sum, threads) => sum + threads,
+    0
+  );
+  if (totalThreadsAtTimestamp > maxUsers) {
+    maxUsers = totalThreadsAtTimestamp;
+  }
+});
 
-    // Definir startTime e endTime
+// Agora, encontre o início do ramp-up (primeiro usuário > 0)
+let rampStart = null;
+for (const timestamp of sortedTimestamps) {
+  const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
+  const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
+    (sum, threads) => sum + threads,
+    0
+  );
+  if (rampStart === null && totalThreadsAtTimestamp > 0) {
+    rampStart = timestamp;
+    break;
+  }
+}
+
+// Agora, encontre o momento em que atinge o máximo de usuários pela primeira vez
+let rampEnd = null;
+for (const timestamp of sortedTimestamps) {
+  const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
+  const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
+    (sum, threads) => sum + threads,
+    0
+  );
+  if (totalThreadsAtTimestamp === maxUsers) {
+    rampEnd = timestamp;
+    break;
+  }
+}
+
+const durationMs = rampEnd && rampStart ? rampEnd - rampStart : 0;
+const rampUpInfo = {
+  users: maxUsers,
+  usersPerTest: maxUsersPerTest,
+  duration: formatDuration(durationMs),
+};
+
     startTime = new Date(minTime).toLocaleString("pt-BR");
     endTime = new Date(maxTime).toLocaleString("pt-BR");
 
@@ -309,6 +332,7 @@ export async function POST(request: NextRequest) {
       aggregateReport,
       timeSeriesData: seriesData,
       errorDetails,
+      labels: labels, // Adiciona a lista de labels para o frontend
     });
   } catch (error) {
     console.error("Erro ao processar o arquivo:", error);
