@@ -336,10 +336,10 @@ export default function PerformanceDashboard() {
   }) => {
     const ChartComponent = chartType === "line" ? LineChart : chartType === "bar" ? BarChart : chartType === "area" ? AreaChart : ComposedChart;
     const DataComponent = chartType === "line" || chartType === "composed" ? Line : chartType === "area" ? Area : Bar;
-
+  
     const stats = summary || calculateStats(data, dataKeys);
     const maxValue = stats.max || 10;
-
+  
     if (!data || data.length === 0 || !dataKeys || dataKeys.length === 0) {
       return (
         <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", textAlign: "center" }}>
@@ -348,7 +348,7 @@ export default function PerformanceDashboard() {
         </div>
       );
     }
-
+  
     return (
       <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px", boxShadow: "0px 2px 5px rgba(0,0,0,0.1)" }}>
         <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", textAlign: "center", marginBottom: "10px" }}>{title}</h3>
@@ -404,7 +404,7 @@ export default function PerformanceDashboard() {
                   dataKey={key}
                   stroke={COLORS[index % COLORS.length]}
                   fill={COLORS[index % COLORS.length]}
-                  fillOpacity={0.6}
+                  fillOpacity={chartType === "area" ? 0.1 : 0.6} // Ajustado para maior transparência em gráficos de área
                   strokeWidth={2}
                   activeDot={{ r: 6 }}
                   name={`Teste ${key.split('_')[1] || 'Desconhecido'}`}
