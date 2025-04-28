@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend,
   PieChart, Pie, BarChart, Bar, AreaChart, Area, Cell, ComposedChart, Scatter,
@@ -29,6 +29,19 @@ type AggregateReportItem = {
   sentBytes: number;
 };
 
+type TestData = {
+  timeStamp: number;
+  label: string;
+  elapsed: number;
+  success: string;
+  allThreads: number;
+  Latency: number;
+  bytes: number;
+  sentBytes: number;
+  responseCode?: string;
+  responseMessage?: string;
+};
+
 export default function PerformanceDashboard() {
   const [theme, setTheme] = useState<"dark" | "light">("light");
   const [chartFilter, setChartFilter] = useState<string>("all");
@@ -45,6 +58,23 @@ export default function PerformanceDashboard() {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [processingTime, setProcessingTime] = useState<number>(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
+  const [papaLoaded, setPapaLoaded] = useState<boolean>(false);
+
+  // Carregar PapaParse via CDN
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js";
+    script.async = true;
+    script.onload = () => setPapaLoaded(true);
+    script.onerror = () => {
+      console.error("Erro ao carregar PapaParse.");
+      setErrorMessage("Erro ao carregar a biblioteca de processamento de arquivos.");
+    };
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
 
   const calculateMedian = (values: number[]): number => {
     if (!values.length) return 0;
@@ -174,9 +204,34 @@ export default function PerformanceDashboard() {
     );
   };
 
+  const HTTP_ERROR_CODES: Record<string, string> = {
+    "400": "Bad Request",
+    "401": "Unauthorized",
+    "403": "Forbidden",
+    "404": "Not Found",
+    "429": "Too Many Requests",
+    "500": "Internal Server Error",
+    "502": "Bad Gateway",
+    "503": "Service Unavailable",
+    "504": "Gateway Timeout"
+  };
+
+  const calculatePercentiles = (times: number[]) => {
+    if (!times || times.length === 0) return { p90: 0, p95: 0 };
+    const sortedTimes = [...times].sort((a, b) => a - b);
+    const p90 = sortedTimes[Math.floor(sortedTimes.length * 0.9)] || 0;
+    const p95 = sortedTimes[Math.floor(sortedTimes.length * 0.95)] || 0;
+    return { p90, p95 };
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (!papaLoaded) {
+      setErrorMessage("Biblioteca de processamento ainda não carregada. Tente novamente em alguns instantes.");
+      return;
+    }
 
     setIsLoading(true);
     setFileSizeWarning("");
@@ -192,31 +247,254 @@ export default function PerformanceDashboard() {
       setFileSizeWarning(`Arquivo grande (${(file.size / (1024 * 1024)).toFixed(2)} MB). O processamento pode demorar.`);
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
+    const Papa = (window as any).Papa;
 
     try {
-      const response = await fetch("/api/process-jtl", {
-        method: "POST",
-        body: formData,
+      let successCount = 0;
+      let errorCount = 0;
+      let startTime = "";
+      let endTime = "";
+      let minTime = Infinity;
+      let maxTime = -Infinity;
+
+      const grouped: Record<string, any> = {};
+      const timeSeries: Record<number, any> = {};
+      const intervalMs = 1000;
+      const labelsSet = new Set<string>();
+      const threadsByLabel: Record<string, number> = {};
+      const threadsByTimestamp: Record<number, Record<string, number>> = {};
+      const allErrorDetails: Record<string, number> = {};
+
+      await new Promise<void>((resolve, reject) => {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          step: (results: any, parser: any) => {
+            const row = results.data as TestData;
+            const timeStamp = Number(row.timeStamp);
+            if (!timeStamp || isNaN(timeStamp)) return;
+
+            const validRow: TestData = {
+              timeStamp,
+              label: row.label || "Unknown",
+              elapsed: Number(row.elapsed) || 0,
+              success: row.success,
+              allThreads: Number(row.allThreads) || 0,
+              Latency: Number(row.Latency) || 0,
+              bytes: Number(row.bytes) || 0,
+              sentBytes: Number(row.sentBytes) || 0,
+              responseCode: row.responseCode,
+              responseMessage: row.responseMessage,
+            };
+
+            minTime = Math.min(minTime, timeStamp);
+            maxTime = Math.max(maxTime, timeStamp);
+
+            if (validRow.success === "true") successCount++;
+            else errorCount++;
+
+            const label = validRow.label;
+            if (!grouped[label]) {
+              grouped[label] = {
+                label,
+                count: 0,
+                totalElapsed: 0,
+                min: Infinity,
+                max: -Infinity,
+                errors: 0,
+                totalLatency: 0,
+                totalBytes: 0,
+                totalSentBytes: 0,
+                responseTimes: [],
+                latencyTimes: [],
+              };
+            }
+            const elapsed = validRow.elapsed;
+            const latency = validRow.Latency;
+            grouped[label].count += 1;
+            grouped[label].totalElapsed += elapsed;
+            grouped[label].totalLatency += latency;
+            grouped[label].totalBytes += validRow.bytes;
+            grouped[label].totalSentBytes += validRow.sentBytes;
+            grouped[label].min = Math.min(grouped[label].min, elapsed);
+            grouped[label].max = Math.max(grouped[label].max, elapsed);
+            if (validRow.success === "false") grouped[label].errors += 1;
+            grouped[label].responseTimes.push(elapsed);
+            grouped[label].latencyTimes.push(latency);
+
+            const timestamp = Math.floor(timeStamp / intervalMs) * intervalMs;
+            labelsSet.add(label);
+            if (!timeSeries[timestamp]) {
+              timeSeries[timestamp] = { time: timestamp };
+              labelsSet.forEach(l => {
+                timeSeries[timestamp][`requestsPerSecond_${l}`] = 0;
+                timeSeries[timestamp][`errorsPerSecond_${l}`] = 0;
+                timeSeries[timestamp][`activeThreads_${l}`] = 0;
+                timeSeries[timestamp][`bytes_${l}`] = 0;
+                timeSeries[timestamp][`sentBytes_${l}`] = 0;
+                timeSeries[timestamp][`elapsed_${l}`] = 0;
+                timeSeries[timestamp][`latency_${l}`] = 0;
+                timeSeries[timestamp][`checksPerSecond_${l}`] = 0;
+                timeSeries[timestamp][`errorDetails_${l}`] = {};
+              });
+            }
+            timeSeries[timestamp][`requestsPerSecond_${label}`] += 1;
+            if (validRow.success === "false") {
+              timeSeries[timestamp][`errorsPerSecond_${label}`] += 1;
+              const errorCode = validRow.responseCode || "000";
+              const errorMessage = validRow.responseMessage || HTTP_ERROR_CODES[errorCode] || "Erro não especificado";
+              const errorKey = `${errorCode}: ${errorMessage}`;
+              timeSeries[timestamp][`errorDetails_${label}`][errorKey] =
+                (timeSeries[timestamp][`errorDetails_${label}`][errorKey] || 0) + 1;
+              allErrorDetails[errorKey] = (allErrorDetails[errorKey] || 0) + 1;
+            }
+            timeSeries[timestamp][`activeThreads_${label}`] = Math.max(
+              timeSeries[timestamp][`activeThreads_${label}`] || 0,
+              validRow.allThreads
+            );
+            timeSeries[timestamp][`bytes_${label}`] += validRow.bytes;
+            timeSeries[timestamp][`sentBytes_${label}`] += validRow.sentBytes;
+            timeSeries[timestamp][`elapsed_${label}`] = validRow.elapsed;
+            timeSeries[timestamp][`latency_${label}`] = validRow.Latency;
+            if (validRow.success === "true") timeSeries[timestamp][`checksPerSecond_${label}`] += 1;
+
+            if (validRow.allThreads > 0) {
+              if (!threadsByTimestamp[timeStamp]) {
+                threadsByTimestamp[timeStamp] = {};
+              }
+              threadsByTimestamp[timeStamp][label] = Math.max(
+                threadsByTimestamp[timeStamp][label] || 0,
+                validRow.allThreads
+              );
+              threadsByLabel[label] = Math.max(threadsByLabel[label] || 0, validRow.allThreads);
+            }
+          },
+          complete: () => resolve(),
+          error: (error: any) => reject(error),
+        });
       });
 
-      if (!response.ok) {
-        throw new Error("Erro ao processar o arquivo na API.");
+      const durationSeconds = (maxTime - minTime) / 1000;
+      const aggregateReport = Object.values(grouped).map((item: any) => {
+        item.responseTimes.sort((a: number, b: number) => a - b);
+        item.latencyTimes.sort((a: number, b: number) => a - b);
+
+        const average = item.totalElapsed / item.count;
+        const averageLatency = item.totalLatency / item.count;
+        const median = item.responseTimes[Math.floor(item.responseTimes.length / 2)] || 0;
+        const medianLatency = item.latencyTimes[Math.floor(item.latencyTimes.length / 2)] || 0;
+        const { p90, p95 } = calculatePercentiles(item.responseTimes);
+        const throughput = item.count / (durationSeconds || 1);
+
+        return {
+          label: item.label,
+          average: Number(average.toFixed(2)),
+          median: Number(median.toFixed(2)),
+          p90: Number(p90.toFixed(2)),
+          p95: Number(p95.toFixed(2)),
+          min: Number(item.min.toFixed(2)),
+          max: Number(item.max.toFixed(2)),
+          errorRate: Number(((item.errors / item.count) * 100).toFixed(2)),
+          throughput: Number(throughput.toFixed(2)),
+          count: item.count,
+          averageLatency: Number(averageLatency.toFixed(2)),
+          medianLatency: Number(medianLatency.toFixed(2)),
+          bytes: Number((item.totalBytes / item.count).toFixed(2)),
+          sentBytes: Number((item.totalSentBytes / item.count).toFixed(2)),
+        };
+      });
+
+      const labels = Array.from(labelsSet);
+      const seriesData = Object.values(timeSeries)
+        .map((item: any) => {
+          const entry: any = {
+            time: new Date(item.time).toLocaleTimeString("pt-BR", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            }),
+            timeStamp: item.time,
+          };
+          labels.forEach(label => {
+            entry[`requestsPerSecond_${label}`] = item[`requestsPerSecond_${label}`] || 0;
+            entry[`errorsPerSecond_${label}`] = item[`errorsPerSecond_${label}`] || 0;
+            entry[`activeThreads_${label}`] = item[`activeThreads_${label}`] || 0;
+            entry[`bytes_${label}`] = item[`bytes_${label}`] || 0;
+            entry[`sentBytes_${label}`] = item[`sentBytes_${label}`] || 0;
+            entry[`elapsed_${label}`] = item[`elapsed_${label}`] || 0;
+            entry[`latency_${label}`] = item[`latency_${label}`] || 0;
+            entry[`checksPerSecond_${label}`] = item[`checksPerSecond_${label}`] || 0;
+            entry[`errorDetails_${label}`] = item[`errorDetails_${label}`] || {};
+          });
+          return entry;
+        })
+        .sort((a: any, b: any) => a.timeStamp - b.timeStamp);
+
+      const errorDetailsArray = Object.entries(allErrorDetails).map(([message, count]: [string, number]) => {
+        const [code, ...msgParts] = message.split(": ");
+        return {
+          code: code,
+          message: msgParts.join(": "),
+          count: count as number,
+        };
+      }).sort((a, b) => b.count - a.count);
+
+      let maxUsers = 0;
+      let maxUsersPerTest = Math.max(...Object.values(threadsByLabel));
+
+      const sortedTimestamps = Object.keys(threadsByTimestamp)
+        .map(ts => Number(ts))
+        .sort((a, b) => a - b);
+
+      sortedTimestamps.forEach(timestamp => {
+        const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
+        const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
+          (sum, threads) => sum + threads,
+          0
+        );
+        if (totalThreadsAtTimestamp > maxUsers) {
+          maxUsers = totalThreadsAtTimestamp;
+        }
+      });
+
+      let rampStart = null;
+      for (const timestamp of sortedTimestamps) {
+        const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
+        const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
+          (sum, threads) => sum + threads,
+          0
+        );
+        if (rampStart === null && totalThreadsAtTimestamp > 0) {
+          rampStart = timestamp;
+          break;
+        }
       }
 
-      const result = await response.json();
-
-      if (result.error) {
-        throw new Error(result.error);
+      let rampEnd = null;
+      for (const timestamp of sortedTimestamps) {
+        const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
+        const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
+          (sum, threads) => sum + threads,
+          0
+        );
+        if (totalThreadsAtTimestamp === maxUsers) {
+          rampEnd = timestamp;
+          break;
+        }
       }
 
-      setSuccessCount(result.successCount);
-      setErrorCount(result.errorCount);
-      setStartTime(result.startTime);
-      setEndTime(result.endTime);
+      const durationMs = rampEnd && rampStart ? rampEnd - rampStart : 0;
+      const rampUpInfo = {
+        users: maxUsers,
+        usersPerTest: maxUsersPerTest,
+        duration: formatDuration(durationMs),
+      };
 
-      const updatedTimeSeriesData = result.timeSeriesData.map((entry: any) => {
+      startTime = new Date(minTime).toLocaleString("pt-BR");
+      endTime = new Date(maxTime).toLocaleString("pt-BR");
+
+      const updatedTimeSeriesData = seriesData.map((entry: any) => {
         const activeThreadsKeys = Object.keys(entry).filter(key => key.startsWith("activeThreads_"));
         const requestKeys = Object.keys(entry).filter(key => key.startsWith("requestsPerSecond_"));
         const checkKeys = Object.keys(entry).filter(key => key.startsWith("checksPerSecond_"));
@@ -224,20 +502,7 @@ export default function PerformanceDashboard() {
         const elapsedKeys = Object.keys(entry).filter(key => key.startsWith("elapsed_"));
         const latencyKeys = Object.keys(entry).filter(key => key.startsWith("latency_"));
 
-        let time = entry.time;
-        if (!time && entry.timeStamp && !isNaN(Number(entry.timeStamp))) {
-          try {
-            const date = new Date(Number(entry.timeStamp));
-            if (!isNaN(date.getTime())) {
-              time = date.toISOString().substring(11, 19);
-            }
-          } catch (e) {
-            console.error("Erro ao converter timeStamp:", entry.timeStamp, e);
-            time = "00:00:00";
-          }
-        }
-
-        const testData: any = { time, timeStamp: Number(entry.timeStamp) };
+        const testData: any = { time: entry.time, timeStamp: Number(entry.timeStamp) };
         activeThreadsKeys.forEach(key => {
           testData[key] = Number(entry[key]) || 0;
         });
@@ -265,36 +530,14 @@ export default function PerformanceDashboard() {
         return testData;
       });
 
-      const activeThreadsKeys = Object.keys(result.timeSeriesData[0] || {}).filter(key => key.startsWith("activeThreads_"));
-      const testGroups = new Set(activeThreadsKeys.map(key => {
-        const parts = key.split('_');
-        return parts.length > 1 ? parts[1] : 'Default';
-      }));
-
-      const maxPerTest = Array.from(testGroups).map(test => {
-        const testKeys = activeThreadsKeys.filter(key => key.includes(`_${test}`));
-        return Math.max(...updatedTimeSeriesData.map((entry: any) => 
-          testKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0)
-        ));
-      });
-
-      const totalUsers = Array.from(testGroups).reduce((sum, test) => {
-        const testKeys = activeThreadsKeys.filter(key => key.includes(`_${test}`));
-        const maxForTest = Math.max(...updatedTimeSeriesData.map((entry: any) => 
-          testKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0)
-        ));
-        return sum + maxForTest;
-      }, 0);
-
-      setRampUpInfo({
-        users: totalUsers,
-        usersPerTest: Math.max(...maxPerTest, 0),
-        duration: result.rampUpInfo.duration // Use backend-provided duration
-      });
-
-      setAggregateReport(result.aggregateReport);
+      setSuccessCount(successCount);
+      setErrorCount(errorCount);
+      setStartTime(startTime);
+      setEndTime(endTime);
+      setRampUpInfo(rampUpInfo);
+      setAggregateReport(aggregateReport);
       setTimeSeriesData(updatedTimeSeriesData);
-      setErrorDetails(result.errorDetails);
+      setErrorDetails(errorDetailsArray);
     } catch (error) {
       console.error("Erro ao processar o arquivo:", error);
       setErrorMessage("Erro ao processar o arquivo. Tente novamente ou use um arquivo menor.");
@@ -404,7 +647,7 @@ export default function PerformanceDashboard() {
                   dataKey={key}
                   stroke={COLORS[index % COLORS.length]}
                   fill={COLORS[index % COLORS.length]}
-                  fillOpacity={chartType === "area" ? 0.1 : 0.6} // Ajustado para maior transparência em gráficos de área
+                  fillOpacity={chartType === "area" ? 0.1 : 0.6}
                   strokeWidth={2}
                   activeDot={{ r: 6 }}
                   name={`Teste ${key.split('_')[1] || 'Desconhecido'}`}
@@ -583,7 +826,7 @@ export default function PerformanceDashboard() {
           <p>Processando arquivo...</p>
           <p>Tempo decorrido: {formatProcessingTime(processingTime)}</p>
           {fileSizeWarning && <p style={{ color: "#F28E2B" }}>{fileSizeWarning}</p>}
-          {isTakingTooLong && <p style={{ color: "#E15759", marginTop: "10px" }}>⚠️ O processamento está demorando mais que o esperado (mais de 5 minutos). Considere usar um arquivo menor ou verificar o status do servidor.</p>}
+          {isTakingTooLong && <p style={{ color: "#E15759", marginTop: "10px" }}>⚠️ O processamento está demorando mais que o esperado (mais de 5 minutos). Considere usar um arquivo menor.</p>}
         </div>
       );
     }
