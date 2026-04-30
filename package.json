@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "git": "^0.1.5",
-    "next": "15.2.0",
+    "next": "15.2.8",
     "papaparse": "^5.5.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
