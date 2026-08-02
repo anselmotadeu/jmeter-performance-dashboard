@@ -1,8 +1,11 @@
 import { jmeterParser } from './jmeter';
 import { k6JsonParser } from './k6';
+import { k6CsvParser } from './k6-csv';
 import { locustParser } from './locust';
 import { artilleryParser } from './artillery';
 import { newmanParser } from './newman';
+import { gatlingParser } from './gatling';
+import { vegetaParser } from './vegeta';
 import type { PerformanceParser, NormalizedPoint, AnalysisResult, AggregateReportItem, TimeSeriesEntry, ErrorDetail } from './types';
 
 export type { PerformanceParser, NormalizedPoint, AnalysisResult };
@@ -10,9 +13,12 @@ export type { PerformanceParser, NormalizedPoint, AnalysisResult };
 const PARSERS: PerformanceParser[] = [
   jmeterParser,
   k6JsonParser,
+  k6CsvParser,
   locustParser,
   artilleryParser,
   newmanParser,
+  gatlingParser,
+  vegetaParser,
 ];
 
 const HTTP_ERROR_CODES: Record<string, string> = {
@@ -327,7 +333,7 @@ export function parseAndAnalyze(content: string, forcedParser?: string): Analysi
     : detectParser(content);
 
   if (!parser) {
-    throw new Error('Formato de arquivo não reconhecido. Suportados: JMeter (.jtl/.csv), K6 (.json), Locust (_stats.csv), Artillery (.json), Newman (.json).');
+    throw new Error('Formato de arquivo não reconhecido. Suportados: JMeter (.jtl/.csv), K6 (.json/.csv), Locust (_stats.csv), Artillery (.json), Newman (.json), Gatling (.log), Vegeta (.json).');
   }
 
   const points = parser.parse(content);

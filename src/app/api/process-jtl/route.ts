@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, isAuthRequired } from '@/lib/auth';
 import { parseAndAnalyze, listParsers } from '@/lib/parsers';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 const ALLOWED_EXTENSIONS = new Set(['.jtl', '.csv', '.json', '.log']);
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB server-side hard limit
@@ -13,6 +14,26 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
     }
+  }
+
+  // Rate limiting: 10 uploads/min per IP (in-memory; upgrade to Redis for multi-instance)
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? request.headers.get('x-real-ip')
+    ?? 'unknown';
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Muitas requisições. Tente novamente em breve.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': '10',
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(Math.ceil(rl.resetAt / 1000)),
+          'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+        },
+      },
+    );
   }
 
   let file: File | null = null;

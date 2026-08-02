@@ -234,6 +234,22 @@ export default function PerformanceDashboard() {
     }
   };
 
+  const exportAggregateCSV = () => {
+    if (!aggregateReport.length) return;
+    const headers = ['Label', 'Amostras', 'Média (ms)', 'Mediana (ms)', 'P90 (ms)', 'P95 (ms)', 'Mínimo (ms)', 'Máximo (ms)', 'Taxa de Erro (%)', 'Throughput (req/s)', 'Latência Média (ms)', 'Bytes Médios'];
+    const rows = aggregateReport.map(r => [
+      `"${r.label.replace(/"/g, '""')}"`, r.count, r.average, r.median, r.p90, r.p95, r.min, r.max, r.errorRate, r.throughput, r.averageLatency, r.bytes,
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio-agregado-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const calculateStats = (data: any[], dataKeys: string[]) => {
     const values: number[] = data
       .flatMap(entry => dataKeys.map(key => Number(entry[key]) || 0))
@@ -520,7 +536,7 @@ export default function PerformanceDashboard() {
     if (!startTime || !endTime) {
       return (
         <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "20px", borderRadius: "8px", textAlign: "center", color: themeStyles[theme].text }}>
-          {errorMessage || "Nenhum dado carregado. Faça upload de um arquivo JTL."}
+          {errorMessage || "Nenhum dado carregado. Faça upload de um arquivo JTL, JSON, CSV ou LOG."}
         </div>
       );
     }
@@ -711,7 +727,26 @@ export default function PerformanceDashboard() {
 
         {shouldShow("aggregate") && (
           <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px" }}>
-            <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", textAlign: "center", marginBottom: "15px" }}>Relatório Agregado - Tempos de Resposta</h3>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "14px", marginBottom: "15px" }}>
+              <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", margin: 0 }}>Relatório Agregado - Tempos de Resposta</h3>
+              {aggregateReport.length > 0 && (
+                <button
+                  onClick={exportAggregateCSV}
+                  style={{
+                    padding: "5px 12px",
+                    borderRadius: "5px",
+                    border: `1px solid ${themeStyles[theme].border}`,
+                    backgroundColor: theme === "dark" ? "#2a4a6a" : "#e8f0fe",
+                    color: theme === "dark" ? "#76B7B2" : "#1a5276",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  ⬇ Exportar CSV
+                </button>
+              )}
+            </div>
             <div style={{ overflowX: "auto" }}>
               <ResponsiveContainer width="100%" height={500}>
                 <BarChart data={aggregateReport} layout="vertical" margin={{ top: 20, right: 30, left: 100, bottom: 20 }}>
@@ -727,6 +762,35 @@ export default function PerformanceDashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            {aggregateReport.length > 0 && (
+              <div style={{ overflowX: "auto", marginTop: "20px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: theme === "dark" ? "#2a2a2a" : "#e8f0fe" }}>
+                      {['Label', 'Amostras', 'Média', 'Mediana', 'P90', 'P95', 'Mín', 'Máx', '% Erro', 'Throughput'].map(h => (
+                        <th key={h} style={{ padding: "8px 10px", textAlign: "left", color: theme === "dark" ? "#76B7B2" : "#1a5276", fontWeight: 600, whiteSpace: "nowrap", borderBottom: `2px solid ${themeStyles[theme].border}` }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aggregateReport.map((r, i) => (
+                      <tr key={r.label} style={{ backgroundColor: i % 2 === 0 ? themeStyles[theme].bg : themeStyles[theme].cardBg }}>
+                        <td style={{ padding: "7px 10px", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.label}>{r.label}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{r.count.toLocaleString('pt-BR')}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.average, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.median, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.p90, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.p95, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.min, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.max, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", color: r.errorRate > 5 ? themeStyles[theme].error : r.errorRate > 1 ? "#F28E2B" : themeStyles[theme].success, fontWeight: r.errorRate > 1 ? 600 : 400 }}>{r.errorRate.toFixed(2)}%</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{r.throughput.toFixed(2)}/s</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -787,7 +851,7 @@ export default function PerformanceDashboard() {
         <div>
           <h1 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", margin: "0 0 4px" }}>📊 Dashboard de Performance</h1>
           <p style={{ margin: 0, fontSize: "13px", color: themeStyles[theme].text, opacity: 0.6 }}>
-            JMeter · K6 · Locust · Artillery · Newman
+            JMeter · K6 · Locust · Artillery · Newman · Gatling · Vegeta
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -853,7 +917,7 @@ export default function PerformanceDashboard() {
             <input type="file" accept=".csv,.jtl,.json,.log" onChange={handleFileUpload} style={{ display: "none" }} />
           </label>
           <span style={{ fontSize: "12px", color: themeStyles[theme].text, opacity: 0.55 }}>
-            Suporta: JMeter (.jtl/.csv) · K6 (.json) · Locust (_stats.csv) · Artillery (.json) · Newman (.json)
+            Suporta: JMeter (.jtl/.csv) · K6 (.json/.csv) · Locust (_stats.csv) · Artillery (.json) · Newman (.json) · Gatling (.log) · Vegeta (.json)
           </span>
           {detectedFramework && !isLoading && (
             <span style={{
