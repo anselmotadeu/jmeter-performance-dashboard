@@ -1,135 +1,127 @@
-import type { PerformanceParser, NormalizedPoint } from './types';
+import Papa from 'papaparse';
+import type { NormalizedPoint, PerformanceParser } from './types';
 
-// K6 CSV output — produced with: k6 run --out csv=result.csv
-//
-// Header: metric_name,timestamp,metric_value,check,error,error_code,
-//         expected_response,group,method,name,proto,scenario,service,
-//         status,subproto,tls_version,url,extra_tags
-//
-// Relevant metric_name values:
-//   http_req_duration   — response time (ms)
-//   http_req_waiting    — latency / TTFB (ms)
-//   http_req_failed     — 1 = failed, 0 = ok
-//   http_req_receiving  — receive phase (ms)
-//   http_req_sending    — send phase (ms)
-//   http_req_blocked    — connection blocked time (ms)
-//   http_req_connecting — TCP connect time (ms)
-//   vus                 — active virtual users (no name/method tags)
+type K6CsvRow = Record<string, string>;
+
+function normalizeTimestamp(value: string) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    if (numeric >= 1e17) return numeric / 1e6;
+    if (numeric >= 1e14) return numeric / 1e3;
+    if (numeric >= 1e11) return numeric;
+    return numeric * 1000;
+  }
+  return Date.parse(value);
+}
+
+function fingerprint(row: K6CsvRow) {
+  return [row.timestamp, row.name || row.url, row.method, row.scenario, row.group].join('::');
+}
+
+function valuesByKey(rows: K6CsvRow[], metric: string) {
+  const result = new Map<string, number[]>();
+  for (const row of rows) {
+    if (row.metric_name !== metric) continue;
+    const value = Number(row.metric_value);
+    if (!Number.isFinite(value)) continue;
+    const key = fingerprint(row);
+    const values = result.get(key) ?? [];
+    values.push(value);
+    result.set(key, values);
+  }
+  return result;
+}
+
+function gaugeAt(points: Array<[number, number]>, timestamp: number) {
+  let left = 0;
+  let right = points.length - 1;
+  let value: number | null = null;
+  while (left <= right) {
+    const middle = Math.floor((left + right) / 2);
+    if (points[middle][0] <= timestamp) { value = points[middle][1]; left = middle + 1; }
+    else right = middle - 1;
+  }
+  return value;
+}
 
 export const k6CsvParser: PerformanceParser = {
   name: 'k6-csv',
-  displayName: 'K6 CSV',
+  displayName: 'k6 CSV',
   supportedExtensions: ['.csv'],
-
-  detect(firstLines: string): boolean {
-    return (
-      firstLines.includes('metric_name') &&
-      firstLines.includes('metric_value') &&
-      firstLines.includes('http_req_duration')
-    );
+  dataQuality: 'certified',
+  capabilities: {
+    requestSamples: true,
+    timeSeries: true,
+    activeUsers: true,
+    responseTime: true,
+    waitingTime: true,
+    networkBytes: false,
+    errors: true,
   },
 
-  parse(content: string): NormalizedPoint[] {
-    const lines = content.split('\n');
-    if (lines.length < 2) return [];
+  detect(sample) {
+    const header = sample.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0].toLowerCase();
+    return header.includes('metric_name') && header.includes('timestamp') && header.includes('metric_value');
+  },
 
-    const header = lines[0].split(',').map(h => h.trim());
-    const idx = (name: string) => header.indexOf(name);
-
-    const iMetric = idx('metric_name');
-    const iTs = idx('timestamp');
-    const iVal = idx('metric_value');
-    const iName = idx('name');
-    const iStatus = idx('status');
-    const iError = idx('error');
-
-    if (iMetric < 0 || iTs < 0 || iVal < 0) return [];
-
-    // Aggregate rows by (second, label)
-    type Bucket = {
-      timestamp: number;
-      label: string;
-      duration: number | null;
-      waiting: number | null;
-      failed: number | null;
-      status: string;
-      error: string;
-    };
-
-    const buckets = new Map<string, Bucket>();
+  parse(content) {
+    const parsed = Papa.parse<K6CsvRow>(content.replace(/^\uFEFF/, ''), {
+      header: true,
+      skipEmptyLines: 'greedy',
+      transformHeader: (header) => header.trim(),
+    });
+    const rows = parsed.data;
+    const waiting = valuesByKey(rows, 'http_req_waiting');
+    const failed = valuesByKey(rows, 'http_req_failed');
+    const consumed = new Map<string, number>();
     const vusBySecond = new Map<number, number>();
 
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      const parts = line.split(',');
-      const metric = parts[iMetric]?.trim();
-      const tsRaw = parts[iTs]?.trim();
-      const val = parseFloat(parts[iVal]?.trim() ?? '');
-
-      if (!metric || !tsRaw || isNaN(val)) continue;
-
-      // K6 CSV timestamps are Unix seconds (integer)
-      const tsMs = Number(tsRaw) * 1000;
-      const sec = Math.floor(tsMs / 1000) * 1000;
-
-      if (metric === 'vus') {
-        vusBySecond.set(sec, Math.max(vusBySecond.get(sec) ?? 0, val));
-        continue;
-      }
-
-      if (!['http_req_duration', 'http_req_waiting', 'http_req_failed'].includes(metric)) continue;
-
-      const name = (iName >= 0 ? parts[iName]?.trim() : '') || 'Unknown';
-      const key = `${sec}::${name}`;
-
-      if (!buckets.has(key)) {
-        buckets.set(key, {
-          timestamp: tsMs,
-          label: name,
-          duration: null,
-          waiting: null,
-          failed: null,
-          status: iStatus >= 0 ? (parts[iStatus]?.trim() ?? '') : '',
-          error: iError >= 0 ? (parts[iError]?.trim() ?? '') : '',
-        });
-      }
-
-      const b = buckets.get(key)!;
-      if (metric === 'http_req_duration') b.duration = val;
-      if (metric === 'http_req_waiting') b.waiting = val;
-      if (metric === 'http_req_failed') b.failed = val;
-      if (iStatus >= 0 && parts[iStatus]?.trim()) b.status = parts[iStatus].trim();
-      if (iError >= 0 && parts[iError]?.trim()) b.error = parts[iError].trim();
+    for (const row of rows) {
+      if (row.metric_name !== 'vus') continue;
+      const timestamp = normalizeTimestamp(row.timestamp);
+      const value = Number(row.metric_value);
+      if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
+      const second = Math.floor(timestamp / 1000) * 1000;
+      vusBySecond.set(second, Math.max(vusBySecond.get(second) ?? 0, value));
     }
 
     const points: NormalizedPoint[] = [];
-
-    for (const b of buckets.values()) {
-      if (b.duration === null) continue;
-
-      const sec = Math.floor(b.timestamp / 1000) * 1000;
-      const vus = vusBySecond.get(sec) ?? 0;
-      const success = b.failed === null ? b.status === '200' || b.status === '' : b.failed === 0;
-      const elapsed = b.duration;
-      const latency = b.waiting ?? Math.floor(elapsed * 0.7);
-      const responseCode = b.status || (success ? '200' : '500');
+    const vusTimeline = Array.from(vusBySecond.entries()).sort(([a], [b]) => a - b);
+    for (const row of rows) {
+      if (row.metric_name !== 'http_req_duration') continue;
+      const eventTimestamp = normalizeTimestamp(row.timestamp);
+      const elapsed = Number(row.metric_value);
+      if (!Number.isFinite(eventTimestamp) || !Number.isFinite(elapsed)) continue;
+      const timestamp = Math.max(0, eventTimestamp - elapsed);
+      const key = fingerprint(row);
+      const index = consumed.get(key) ?? 0;
+      consumed.set(key, index + 1);
+      const failedValue = failed.get(key)?.[index];
+      const expectedResponse = row.expected_response?.toLowerCase();
+      const status = row.status || undefined;
+      const statusNumber = Number(status);
+      const success = failedValue !== undefined
+        ? failedValue === 0
+        : expectedResponse
+          ? expectedResponse === 'true'
+          : !row.error && (!status || (statusNumber >= 200 && statusNumber < 400));
+      const second = Math.floor(eventTimestamp / 1000) * 1000;
 
       points.push({
-        timestamp: b.timestamp,
-        label: b.label,
+        timestamp,
+        label: row.name || row.url || row.scenario || 'Sem nome',
         elapsed,
         success,
-        activeUsers: vus,
-        latency,
-        bytesReceived: 0,
-        bytesSent: 0,
-        responseCode,
-        responseMessage: success ? undefined : (b.error || 'failed'),
+        activeUsers: vusBySecond.get(second) ?? gaugeAt(vusTimeline, second),
+        latency: waiting.get(key)?.[index] ?? null,
+        bytesReceived: null,
+        bytesSent: null,
+        responseCode: status,
+        responseMessage: success ? undefined : (row.error || row.error_code || (status ? `HTTP ${status}` : 'Falha k6')),
       });
     }
 
+    if (!points.length && parsed.errors.length) throw new Error(`CSV k6 inválido: ${parsed.errors[0].message}`);
     return points;
   },
 };

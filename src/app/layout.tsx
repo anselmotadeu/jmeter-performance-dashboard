@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import { Providers } from './providers';
+import { Analytics } from '@vercel/analytics/react';
+import { ThemeProvider } from '@/context/ThemeContext';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -14,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Dashboard de Performance',
-  description: 'Análise de testes de performance: JMeter, K6, Locust, Artillery e mais.',
+  title: 'Performance Dashboard',
+  description: 'Inteligência, histórico e comparação para testes JMeter e k6.',
 };
 
 export default function RootLayout({
@@ -24,9 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" className="light">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <Providers>{children}</Providers>
+        <ThemeProvider>{children}</ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );

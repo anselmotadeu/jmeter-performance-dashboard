@@ -1,175 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Performance Dashboard
 
-## Getting Started
+Plataforma para analisar, versionar e comparar execuções de testes de performance. O produto possui suporte certificado para Apache JMeter e k6, histórico por projeto, baseline e identificação automática de regressões.
 
-First, run the development server:
+## Funcionalidades
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Cadastro, confirmação de e-mail, login e recuperação de senha.
+- Workspaces e projetos preparados para equipes.
+- Processamento local: o arquivo bruto não é enviado ao servidor.
+- JMeter JTL/CSV certificado.
+- k6 CSV, NDJSON e summary JSON certificado.
+- Parsers experimentais para Locust, Artillery, Newman, Gatling e Vegeta identificados como Beta.
+- Métricas agregadas, séries temporais, erros, checks e thresholds.
+- Histórico persistido no Neon.
+- Baseline por projeto e comparação automática de regressões.
+- Exportação CSV protegida contra formula injection.
+- Interface responsiva, tema claro/escuro e acessibilidade por teclado.
+- CI, CodeQL e Dependabot.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Privacidade
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Arquivos JTL, CSV, JSON e NDJSON são lidos no navegador. Ao salvar uma análise, somente métricas agregadas são enviadas ao backend:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- contagens, médias e percentis por endpoint;
+- buckets temporais agregados;
+- erros agrupados;
+- checks e thresholds;
+- metadados do framework e capabilities.
 
-## Learn More
+Não são persistidos arquivos brutos, headers, cookies, bodies ou cada requisição individual.
 
-To learn more about Next.js, take a look at the following resources:
+## Formatos certificados
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Ferramenta | Formato |
+|---|---|
+| JMeter | JTL request-level em CSV com cabeçalho |
+| k6 | `--out csv` |
+| k6 | `--out json` (NDJSON) |
+| k6 | `handleSummary(data)` JSON |
+| k6 | Machine-readable summary v1 |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Arquivos pequenos para validação manual estão em [`Tests/`](./Tests).
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-
-# JMeter Performance Dashboard
-
-![Next.js](https://img.shields.io/badge/Next.js-14.0.0-black) ![Recharts](https://img.shields.io/badge/Recharts-2.12.7-blue) ![Papaparse](https://img.shields.io/badge/Papaparse-5.4.1-green)
-
-Um dashboard interativo para análise de resultados de testes de performance realizados com o JMeter. Este projeto fornece métricas claras e precisas com gráficos intuitivos e informações detalhadas, ideal para equipes que precisam documentar e compartilhar resultados de testes de carga e performance.
-
-O dashboard está hospedado no Vercel e pode ser acessado em:  
-🔗 [https://jmeter-performance-dashboard.vercel.app](https://jmeter-performance-dashboard.vercel.app)
-
-## 📋 Visão Geral
-
-O projeto processa arquivos `.jtl` ou `.csv` gerados pelo JMeter e apresenta os resultados de forma visual e analítica, incluindo gráficos de séries temporais, relatórios agregados, distribuições de tempos de resposta e métricas como média, percentis (P90, P95), throughput, taxas de erro e mais.
-
-## 🚩 Funcionalidades Principais
-
-- Upload de arquivos `.jtl` ou `.csv` do JMeter.
-- Exibição de início, fim, duração total e ramp-up dos testes.
-- Métricas agregadas de tempo de resposta (`média`, `mínimo`, `máximo`, `P90`, `P95`).
-- Gráficos de séries temporais:
-  - Virtual Users
-  - Requests per Second
-  - Errors per Second
-  - Checks per Second
-  - Response Time (over time)
-  - Response Time Percentiles (over time)
-  - Waiting Time (over time)
-  - Bytes Received (over time)
-- Relatórios agregados:
-  - Aggregate Report com métricas detalhadas.
-  - Response Time Distribution (histograma).
-- Análise de sucesso e erros:
-  - Gráficos de pizza com quantidade e percentual de sucesso vs erro.
-  - Detalhamento de mensagens de erro.
-- Filtros de tempo: todo o período, últimos 5 min, 15 min, 30 min ou 1 hora.
-- Formatação amigável de valores (ex.: "128.00 ms", "8.19 s", "1.09 mins").
-
-## 🚀 Como Usar
-
-### Online (Recomendado)
-
-1. Acesse: [https://jmeter-performance-dashboard.vercel.app](https://jmeter-performance-dashboard.vercel.app).
-2. Faça upload de um arquivo `.jtl` ou `.csv` do JMeter.
-3. Visualize os gráficos e relatórios.
-4. Use o filtro de tempo para ajustar a análise.
-
-### Localmente
-
-#### Pré-requisitos
-- Node.js 14+
-- npm ou yarn
-
-#### Passos
+## Desenvolvimento
 
 ```bash
-git clone https://github.com/seu-usuario/jmeter-performance-dashboard.git
-cd jmeter-performance-dashboard
 npm install
+cp .env.example .env.local
+npm run migrate
 npm run dev
 ```
 
-Acesse `http://localhost:3000` no navegador e faça upload do arquivo .jtl ou .csv.
+Variáveis necessárias:
 
-## 🛠️ Tecnologias Utilizadas
+- `DATABASE_URL`
+- `BETTER_AUTH_SECRET`
+- `BETTER_AUTH_URL`
+- credenciais `ZOHO_SMTP_*`
 
-**Next.js:** Framework React.
+Use obrigatoriamente a Connection Pooling do Neon. O runner mantém a tabela `schema_migration` e aplica somente migrations pendentes.
 
-**Recharts:** Biblioteca de gráficos.
-
-**Papaparse:** Parser de CSV.
-
-**Vercel:** Deploy e hospedagem.
-
-## 📈 Estrutura dos Gráficos e Relatórios
-
-### 1. Detalhes do Teste
-- Início e fim (data/hora).
-- Duração total do teste.
-- Ramp-up: número de usuários e tempo.
-
-### 2. Métricas Agregadas
-- Média, Mínimo, Máximo, P90 e P95 do tempo de resposta.
-
-### 3. Gráficos de Séries Temporais
-- Virtual Users (área empilhada)
-- Requests per Second (barras)
-- Errors per Second (barras)
-- Checks per Second (barras)
-- Response Time (linha)
-- Response Time Percentiles (linhas coloridas)
-- Waiting Time (linha)
-- Bytes Received (linha)
-
-### 4. Relatórios Agregados
-- Aggregate Report:
-  - Média, Mediana, P90, P95, Mínimo, Máximo.
-  - Taxa de erro, Throughput, Contagem de requisições, Latência média.
-  - Bytes Recebidos e Enviados.
-  - Response Time Distribution: Histograma de tempos de resposta.
-
-### 5. Análise de Sucesso e Erros
-- Gráfico de pizza (quantidade e percentual de sucesso vs erro).
-- Detalhamento das mensagens de erro.
-
-## 🌐 Deploy no Vercel
-1. Repositório: https://github.com/seu-usuario/jmeter-performance-dashboard.
-2. Acesse https://vercel.com e conecte o repositório.
-3. Clique em "Deploy" e aguarde a URL pública.
-
-## 📝 Notas de Desenvolvimento
-- Valores arredondados (2 casas decimais) com unidades apropriadas.
-- Gráficos inspirados no padrão do K6 no Grafana.
-- Otimizado para processar arquivos `.jtl` grandes (intervalos de 1s).
-
-## 🤝 Contribuições
-1. Fork do repositório.
-2. Crie uma branch:
+## Qualidade
 
 ```bash
-git checkout -b minha-feature
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run audit:ci
 ```
 
-3. Commit:
-```bash
-git commit -m "Adiciona minha feature"
-```
+## Banco
 
-4. Push:
-```bash
-git push origin minha-feature
-Abra um Pull Request.
-```
+As migrations PostgreSQL ficam em `migrations/`:
 
-## 📧 Contato
-- Nome: [Anselmo Santos]
-- Email: [anselmotadeu@outlook.com]
-- GitHub: https://github.com/anselmotadeu
-- Desenvolvido com 💻 e ☕ por [Anselmo Santos].
+- autenticação Better Auth;
+- workspaces e memberships;
+- projetos e análises;
+- labels, buckets, erros, checks e thresholds;
+- baselines e comparações;
+- uso, planos e estrutura preparada para Stripe.
+
+## Stack
+
+- Next.js 16 + React 19
+- Better Auth
+- PostgreSQL/Neon
+- Tailwind CSS 4
+- Recharts
+- PapaParse
+- Jest + Testing Library
+- Vercel
+
+## Limitações conhecidas
+
+- Parsers Beta não devem ser usados para decisões contratuais sem validação na ferramenta de origem.
+- O limite atual por arquivo é 5 MB para manter o processamento seguro na thread do navegador. Streaming com Web Worker será necessário antes de liberar arquivos maiores.
+- Cobrança Stripe está preparada no schema, mas o checkout será implementado em uma etapa própria.

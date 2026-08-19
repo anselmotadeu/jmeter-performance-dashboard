@@ -1,0 +1,1 @@
+import AuthShell from '@/components/auth/AuthShell';import SignUpForm from '@/components/auth/SignUpForm';export default function Page(){return <AuthShell eyebrow="Comece agora" title="Crie sua conta" description="Seus arquivos continuam no navegador; somente métricas agregadas são salvas."><SignUpForm/></AuthShell>}

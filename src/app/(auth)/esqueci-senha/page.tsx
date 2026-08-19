@@ -1,0 +1,1 @@
+import AuthShell from '@/components/auth/AuthShell';import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm';export default function Page(){return <AuthShell eyebrow="Recuperação" title="Esqueceu sua senha?" description="Enviaremos um link seguro para criar uma nova credencial."><ForgotPasswordForm/></AuthShell>}

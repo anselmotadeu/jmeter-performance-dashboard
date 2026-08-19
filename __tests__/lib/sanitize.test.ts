@@ -1,0 +1,2 @@
+import { sanitizeLabel,sanitizeMessage } from '@/lib/sanitize';
+describe('sensitive data redaction',()=>{it('removes URL credentials, query and fragments',()=>{expect(sanitizeLabel('https://user:pass@example.com/orders?token=secret#item')).toBe('https://example.com/orders')});it('redacts secret-like values and query strings in messages',()=>{const value=sanitizeMessage('Falha em https://api.example.com/path?api_key=secret token=abc123');expect(value).not.toContain('secret');expect(value).not.toContain('abc123');expect(value).toContain('[REDACTED]')})});

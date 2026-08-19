@@ -1,0 +1,1 @@
+import { Suspense } from 'react';import AuthShell from '@/components/auth/AuthShell';import LoginForm from '@/components/auth/LoginForm';export default function Page(){return <AuthShell eyebrow="Acesso seguro" title="Entre na sua conta" description="Acesse projetos, históricos e comparações de performance."><Suspense><LoginForm/></Suspense></AuthShell>}

@@ -1,0 +1,8 @@
+{"type":"Metric","metric":"http_req_duration","data":{"type":"trend","contains":"time"}}
+{"type":"Point","metric":"vus","data":{"time":"2025-10-09T08:53:20.000Z","value":2,"tags":{}}}
+{"type":"Point","metric":"http_req_duration","data":{"time":"2025-10-09T08:53:20.100Z","value":90,"tags":{"name":"GET /catalog","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_waiting","data":{"time":"2025-10-09T08:53:20.100Z","value":60,"tags":{"name":"GET /catalog","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_failed","data":{"time":"2025-10-09T08:53:20.100Z","value":0,"tags":{"name":"GET /catalog","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_duration","data":{"time":"2025-10-09T08:53:20.200Z","value":210,"tags":{"name":"GET /catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_waiting","data":{"time":"2025-10-09T08:53:20.200Z","value":170,"tags":{"name":"GET /catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_failed","data":{"time":"2025-10-09T08:53:20.200Z","value":1,"tags":{"name":"GET /catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}

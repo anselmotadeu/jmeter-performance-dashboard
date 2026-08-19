@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "metadata": { "generatedAt": "2026-08-19T18:00:00Z", "k6Version": "1.5.0" },
+  "config": { "duration": 60 },
+  "results": {
+    "metrics": [
+      { "name": "http_reqs", "type": "counter", "values": { "count": 1000, "rate": 16.6667 } },
+      { "name": "http_req_failed", "type": "rate", "values": { "matches": 20, "total": 1000, "rate": 0.02 } },
+      { "name": "http_req_duration", "type": "trend", "values": { "avg": 180, "min": 40, "med": 140, "max": 1200, "p90": 300, "p95": 450 }, "thresholds": [{ "expression": "p(95)<500", "passed": true }] }
+    ],
+    "checks": { "results": [{ "name": "status is 200", "passes": 980, "fails": 20 }] }
+  }
+}

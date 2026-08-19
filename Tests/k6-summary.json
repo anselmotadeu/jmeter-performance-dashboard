@@ -1,0 +1,17 @@
+{
+  "state": { "testRunDurationMs": 60000 },
+  "metrics": {
+    "http_reqs": { "type": "counter", "contains": "default", "values": { "count": 1000, "rate": 16.6667 } },
+    "http_req_failed": { "type": "rate", "contains": "default", "values": { "rate": 0.02, "passes": 20, "fails": 980 } },
+    "http_req_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": { "avg": 180, "min": 40, "med": 140, "max": 1200, "p(90)": 300, "p(95)": 450 },
+      "thresholds": { "p(95)<500": { "ok": true } }
+    }
+  },
+  "root_group": {
+    "checks": { "status is 200": { "passes": 980, "fails": 20 } },
+    "groups": {}
+  }
+}

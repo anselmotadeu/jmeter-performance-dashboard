@@ -1,0 +1,1 @@
+import { Suspense } from 'react';import AuthShell from '@/components/auth/AuthShell';import ResetPasswordForm from '@/components/auth/ResetPasswordForm';export default function Page(){return <AuthShell eyebrow="Nova credencial" title="Crie uma nova senha" description="Escolha uma senha forte e exclusiva."><Suspense><ResetPasswordForm/></Suspense></AuthShell>}

@@ -1,0 +1,3 @@
+{
+  "buildCommand": "npm run migrate && npm run build"
+}

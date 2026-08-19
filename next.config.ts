@@ -1,18 +1,11 @@
 import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  experimental: {
-    // Allow large file uploads through server actions and route handlers.
-    // Note: On Vercel Hobby, the platform enforces a 4.5MB body limit
-    // regardless of this setting. Upgrade to Vercel Pro for up to 100MB.
-    // For files > 100MB, use direct Supabase Storage uploads (Phase 2).
-    serverActions: {
-      bodySizeLimit: '500mb',
-    },
-  },
-};
-
+const isDev=process.env.NODE_ENV!=='production';
+const securityHeaders=[
+  {key:'X-Frame-Options',value:'DENY'},
+  {key:'X-Content-Type-Options',value:'nosniff'},
+  {key:'Referrer-Policy',value:'strict-origin-when-cross-origin'},
+  {key:'Permissions-Policy',value:'camera=(), microphone=(), geolocation=()'},
+  {key:'Content-Security-Policy',value:["default-src 'self'",isDev?"script-src 'self' 'unsafe-inline' 'unsafe-eval'":"script-src 'self' 'unsafe-inline'","style-src 'self' 'unsafe-inline'","img-src 'self' data: blob:","font-src 'self' data:",isDev?"connect-src 'self' https://vitals.vercel-insights.com ws:":"connect-src 'self' https://vitals.vercel-insights.com","worker-src 'self' blob:","object-src 'none'","base-uri 'self'","frame-ancestors 'none'"].join('; ')},
+];
+const nextConfig:NextConfig={async headers(){return[{source:'/:path*',headers:securityHeaders}]}};
 export default nextConfig;

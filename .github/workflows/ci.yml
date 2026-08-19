@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:ci
+      - run: npm run test:ci
+      - run: npm run build
+        env:
+          DATABASE_URL: postgresql://user:password@localhost:5432/database
+          BETTER_AUTH_SECRET: ci-secret-at-least-32-characters-long
+          BETTER_AUTH_URL: http://localhost:3000

@@ -1,0 +1,11 @@
+metric_name,timestamp,metric_value,check,error,error_code,expected_response,group,method,name,proto,scenario,service,status,subproto,tls_version,url,extra_tags
+vus,1760000000,3,,,,,,,,,,,,,,,
+http_req_duration,1760000000,100,,,0,true,,GET,Home,HTTP/1.1,default,,200,,,https://example.com/,
+http_req_duration,1760000000,120,,,0,true,,GET,Home,HTTP/1.1,default,,200,,,https://example.com/,
+http_req_duration,1760000000,300,,timeout,1050,false,,GET,Home,HTTP/1.1,default,,504,,,https://example.com/,
+http_req_waiting,1760000000,70,,,0,true,,GET,Home,HTTP/1.1,default,,200,,,https://example.com/,
+http_req_waiting,1760000000,80,,,0,true,,GET,Home,HTTP/1.1,default,,200,,,https://example.com/,
+http_req_waiting,1760000000,250,,timeout,1050,false,,GET,Home,HTTP/1.1,default,,504,,,https://example.com/,
+http_req_failed,1760000000,0,,,0,true,,GET,Home,HTTP/1.1,default,,200,,,https://example.com/,
+http_req_failed,1760000000,0,,,0,true,,GET,Home,HTTP/1.1,default,,200,,,https://example.com/,
+http_req_failed,1760000000,1,,timeout,1050,false,,GET,Home,HTTP/1.1,default,,504,,,https://example.com/,

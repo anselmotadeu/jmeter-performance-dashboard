@@ -1,0 +1,7 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect
+1760000000000,100,Login,200,OK,Thread Group 1-1,text,true,,1200,300,2,2,https://example.com/login,70,0,20
+1760000000100,120,Login,200,OK,Thread Group 1-2,text,true,,1250,310,2,2,https://example.com/login,80,0,22
+1760000000200,300,Checkout,200,OK,Thread Group 1-1,text,true,,2400,800,2,2,https://example.com/checkout,220,0,35
+1760000001000,110,Login,200,OK,Thread Group 1-1,text,true,,1210,305,4,4,https://example.com/login,75,0,18
+1760000001100,250,Checkout,200,OK,Thread Group 1-2,text,true,,2350,790,4,4,https://example.com/checkout,180,0,30
+1760000001200,400,Checkout,500,Internal Server Error,Thread Group 1-3,text,false,Database unavailable,500,600,4,4,https://example.com/checkout,320,0,40
