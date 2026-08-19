@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend,
   PieChart, Pie, BarChart, Bar, AreaChart, Area, Cell, ComposedChart, Scatter,
@@ -29,20 +30,9 @@ type AggregateReportItem = {
   sentBytes: number;
 };
 
-type TestData = {
-  timeStamp: number;
-  label: string;
-  elapsed: number;
-  success: string;
-  allThreads: number;
-  Latency: number;
-  bytes: number;
-  sentBytes: number;
-  responseCode?: string;
-  responseMessage?: string;
-};
 
 export default function PerformanceDashboard() {
+  const { data: session } = useSession();
   const [theme, setTheme] = useState<"dark" | "light">("light");
   const [chartFilter, setChartFilter] = useState<string>("all");
   const [startTime, setStartTime] = useState<string>("");
@@ -58,30 +48,14 @@ export default function PerformanceDashboard() {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [processingTime, setProcessingTime] = useState<number>(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
-  const [papaLoaded, setPapaLoaded] = useState<boolean>(false);
-
-  // Carregar PapaParse via CDN
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js";
-    script.async = true;
-    script.onload = () => setPapaLoaded(true);
-    script.onerror = () => {
-      console.error("Erro ao carregar PapaParse.");
-      setErrorMessage("Erro ao carregar a biblioteca de processamento de arquivos.");
-    };
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
+  const [detectedFramework, setDetectedFramework] = useState<string>("");
 
   const calculateMedian = (values: number[]): number => {
     if (!values.length) return 0;
     const sortedValues = [...values].sort((a, b) => a - b);
     const middle = Math.floor(sortedValues.length / 2);
-    return sortedValues.length % 2 === 0 
-      ? (sortedValues[middle - 1] + sortedValues[middle]) / 2 
+    return sortedValues.length % 2 === 0
+      ? (sortedValues[middle - 1] + sortedValues[middle]) / 2
       : sortedValues[middle];
   };
 
@@ -204,348 +178,76 @@ export default function PerformanceDashboard() {
     );
   };
 
-  const HTTP_ERROR_CODES: Record<string, string> = {
-    "400": "Bad Request",
-    "401": "Unauthorized",
-    "403": "Forbidden",
-    "404": "Not Found",
-    "429": "Too Many Requests",
-    "500": "Internal Server Error",
-    "502": "Bad Gateway",
-    "503": "Service Unavailable",
-    "504": "Gateway Timeout"
-  };
-
-  const calculatePercentiles = (times: number[]) => {
-    if (!times || times.length === 0) return { p90: 0, p95: 0 };
-    const sortedTimes = [...times].sort((a, b) => a - b);
-    const p90 = sortedTimes[Math.floor(sortedTimes.length * 0.9)] || 0;
-    const p95 = sortedTimes[Math.floor(sortedTimes.length * 0.95)] || 0;
-    return { p90, p95 };
-  };
-
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    if (!papaLoaded) {
-      setErrorMessage("Biblioteca de processamento ainda não carregada. Tente novamente em alguns instantes.");
-      return;
-    }
 
     setIsLoading(true);
     setFileSizeWarning("");
     setErrorMessage("");
     setProcessingTime(0);
+    setDetectedFramework("");
 
     const interval = setInterval(() => {
       setProcessingTime(prev => prev + 1);
     }, 1000);
     setTimerInterval(interval);
 
-    if (file.size > 50 * 1024 * 1024) {
-      setFileSizeWarning(`Arquivo grande (${(file.size / (1024 * 1024)).toFixed(2)} MB). O processamento pode demorar.`);
+    const fileSizeMB = file.size / (1024 * 1024);
+    if (fileSizeMB > 50) {
+      setFileSizeWarning(`Arquivo grande (${fileSizeMB.toFixed(2)} MB). O processamento pode demorar.`);
     }
 
-    const Papa = (window as any).Papa;
-
     try {
-      let successCount = 0;
-      let errorCount = 0;
-      let startTime = "";
-      let endTime = "";
-      let minTime = Infinity;
-      let maxTime = -Infinity;
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const grouped: Record<string, any> = {};
-      const timeSeries: Record<number, any> = {};
-      const intervalMs = 1000;
-      const labelsSet = new Set<string>();
-      const threadsByLabel: Record<string, number> = {};
-      const threadsByTimestamp: Record<number, Record<string, number>> = {};
-      const allErrorDetails: Record<string, number> = {};
-
-      await new Promise<void>((resolve, reject) => {
-        Papa.parse(file, {
-          header: true,
-          skipEmptyLines: true,
-          step: (results: any, parser: any) => {
-            const row = results.data as TestData;
-            const timeStamp = Number(row.timeStamp);
-            if (!timeStamp || isNaN(timeStamp)) return;
-
-            const validRow: TestData = {
-              timeStamp,
-              label: row.label || "Unknown",
-              elapsed: Number(row.elapsed) || 0,
-              success: row.success,
-              allThreads: Number(row.allThreads) || 0,
-              Latency: Number(row.Latency) || 0,
-              bytes: Number(row.bytes) || 0,
-              sentBytes: Number(row.sentBytes) || 0,
-              responseCode: row.responseCode,
-              responseMessage: row.responseMessage,
-            };
-
-            minTime = Math.min(minTime, timeStamp);
-            maxTime = Math.max(maxTime, timeStamp);
-
-            if (validRow.success === "true") successCount++;
-            else errorCount++;
-
-            const label = validRow.label;
-            if (!grouped[label]) {
-              grouped[label] = {
-                label,
-                count: 0,
-                totalElapsed: 0,
-                min: Infinity,
-                max: -Infinity,
-                errors: 0,
-                totalLatency: 0,
-                totalBytes: 0,
-                totalSentBytes: 0,
-                responseTimes: [],
-                latencyTimes: [],
-              };
-            }
-            const elapsed = validRow.elapsed;
-            const latency = validRow.Latency;
-            grouped[label].count += 1;
-            grouped[label].totalElapsed += elapsed;
-            grouped[label].totalLatency += latency;
-            grouped[label].totalBytes += validRow.bytes;
-            grouped[label].totalSentBytes += validRow.sentBytes;
-            grouped[label].min = Math.min(grouped[label].min, elapsed);
-            grouped[label].max = Math.max(grouped[label].max, elapsed);
-            if (validRow.success === "false") grouped[label].errors += 1;
-            grouped[label].responseTimes.push(elapsed);
-            grouped[label].latencyTimes.push(latency);
-
-            const timestamp = Math.floor(timeStamp / intervalMs) * intervalMs;
-            labelsSet.add(label);
-            if (!timeSeries[timestamp]) {
-              timeSeries[timestamp] = { time: timestamp };
-              labelsSet.forEach(l => {
-                timeSeries[timestamp][`requestsPerSecond_${l}`] = 0;
-                timeSeries[timestamp][`errorsPerSecond_${l}`] = 0;
-                timeSeries[timestamp][`activeThreads_${l}`] = 0;
-                timeSeries[timestamp][`bytes_${l}`] = 0;
-                timeSeries[timestamp][`sentBytes_${l}`] = 0;
-                timeSeries[timestamp][`elapsed_${l}`] = 0;
-                timeSeries[timestamp][`latency_${l}`] = 0;
-                timeSeries[timestamp][`checksPerSecond_${l}`] = 0;
-                timeSeries[timestamp][`errorDetails_${l}`] = {};
-              });
-            }
-            timeSeries[timestamp][`requestsPerSecond_${label}`] += 1;
-            if (validRow.success === "false") {
-              timeSeries[timestamp][`errorsPerSecond_${label}`] += 1;
-              const errorCode = validRow.responseCode || "000";
-              const errorMessage = validRow.responseMessage || HTTP_ERROR_CODES[errorCode] || "Erro não especificado";
-              const errorKey = `${errorCode}: ${errorMessage}`;
-              timeSeries[timestamp][`errorDetails_${label}`][errorKey] =
-                (timeSeries[timestamp][`errorDetails_${label}`][errorKey] || 0) + 1;
-              allErrorDetails[errorKey] = (allErrorDetails[errorKey] || 0) + 1;
-            }
-            timeSeries[timestamp][`activeThreads_${label}`] = Math.max(
-              timeSeries[timestamp][`activeThreads_${label}`] || 0,
-              validRow.allThreads
-            );
-            timeSeries[timestamp][`bytes_${label}`] += validRow.bytes;
-            timeSeries[timestamp][`sentBytes_${label}`] += validRow.sentBytes;
-            timeSeries[timestamp][`elapsed_${label}`] = validRow.elapsed;
-            timeSeries[timestamp][`latency_${label}`] = validRow.Latency;
-            if (validRow.success === "true") timeSeries[timestamp][`checksPerSecond_${label}`] += 1;
-
-            if (validRow.allThreads > 0) {
-              if (!threadsByTimestamp[timeStamp]) {
-                threadsByTimestamp[timeStamp] = {};
-              }
-              threadsByTimestamp[timeStamp][label] = Math.max(
-                threadsByTimestamp[timeStamp][label] || 0,
-                validRow.allThreads
-              );
-              threadsByLabel[label] = Math.max(threadsByLabel[label] || 0, validRow.allThreads);
-            }
-          },
-          complete: () => resolve(),
-          error: (error: any) => reject(error),
-        });
+      const response = await fetch("/api/process-jtl", {
+        method: "POST",
+        body: formData,
       });
 
-      const durationSeconds = (maxTime - minTime) / 1000;
-      const aggregateReport = Object.values(grouped).map((item: any) => {
-        item.responseTimes.sort((a: number, b: number) => a - b);
-        item.latencyTimes.sort((a: number, b: number) => a - b);
-
-        const average = item.totalElapsed / item.count;
-        const averageLatency = item.totalLatency / item.count;
-        const median = item.responseTimes[Math.floor(item.responseTimes.length / 2)] || 0;
-        const medianLatency = item.latencyTimes[Math.floor(item.latencyTimes.length / 2)] || 0;
-        const { p90, p95 } = calculatePercentiles(item.responseTimes);
-        const throughput = item.count / (durationSeconds || 1);
-
-        return {
-          label: item.label,
-          average: Number(average.toFixed(2)),
-          median: Number(median.toFixed(2)),
-          p90: Number(p90.toFixed(2)),
-          p95: Number(p95.toFixed(2)),
-          min: Number(item.min.toFixed(2)),
-          max: Number(item.max.toFixed(2)),
-          errorRate: Number(((item.errors / item.count) * 100).toFixed(2)),
-          throughput: Number(throughput.toFixed(2)),
-          count: item.count,
-          averageLatency: Number(averageLatency.toFixed(2)),
-          medianLatency: Number(medianLatency.toFixed(2)),
-          bytes: Number((item.totalBytes / item.count).toFixed(2)),
-          sentBytes: Number((item.totalSentBytes / item.count).toFixed(2)),
-        };
-      });
-
-      const labels = Array.from(labelsSet);
-      const seriesData = Object.values(timeSeries)
-        .map((item: any) => {
-          const entry: any = {
-            time: new Date(item.time).toLocaleTimeString("pt-BR", {
-              hour12: false,
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            }),
-            timeStamp: item.time,
-          };
-          labels.forEach(label => {
-            entry[`requestsPerSecond_${label}`] = item[`requestsPerSecond_${label}`] || 0;
-            entry[`errorsPerSecond_${label}`] = item[`errorsPerSecond_${label}`] || 0;
-            entry[`activeThreads_${label}`] = item[`activeThreads_${label}`] || 0;
-            entry[`bytes_${label}`] = item[`bytes_${label}`] || 0;
-            entry[`sentBytes_${label}`] = item[`sentBytes_${label}`] || 0;
-            entry[`elapsed_${label}`] = item[`elapsed_${label}`] || 0;
-            entry[`latency_${label}`] = item[`latency_${label}`] || 0;
-            entry[`checksPerSecond_${label}`] = item[`checksPerSecond_${label}`] || 0;
-            entry[`errorDetails_${label}`] = item[`errorDetails_${label}`] || {};
-          });
-          return entry;
-        })
-        .sort((a: any, b: any) => a.timeStamp - b.timeStamp);
-
-      const errorDetailsArray = Object.entries(allErrorDetails).map(([message, count]: [string, number]) => {
-        const [code, ...msgParts] = message.split(": ");
-        return {
-          code: code,
-          message: msgParts.join(": "),
-          count: count as number,
-        };
-      }).sort((a, b) => b.count - a.count);
-
-      let maxUsers = 0;
-      let maxUsersPerTest = Math.max(...Object.values(threadsByLabel));
-
-      const sortedTimestamps = Object.keys(threadsByTimestamp)
-        .map(ts => Number(ts))
-        .sort((a, b) => a - b);
-
-      sortedTimestamps.forEach(timestamp => {
-        const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
-        const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
-          (sum, threads) => sum + threads,
-          0
-        );
-        if (totalThreadsAtTimestamp > maxUsers) {
-          maxUsers = totalThreadsAtTimestamp;
-        }
-      });
-
-      let rampStart = null;
-      for (const timestamp of sortedTimestamps) {
-        const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
-        const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
-          (sum, threads) => sum + threads,
-          0
-        );
-        if (rampStart === null && totalThreadsAtTimestamp > 0) {
-          rampStart = timestamp;
-          break;
-        }
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: "Erro desconhecido." }));
+        throw new Error(errData.error || `Erro HTTP ${response.status}`);
       }
 
-      let rampEnd = null;
-      for (const timestamp of sortedTimestamps) {
-        const threadsByLabelAtTimestamp = threadsByTimestamp[timestamp];
-        const totalThreadsAtTimestamp = Object.values(threadsByLabelAtTimestamp).reduce(
-          (sum, threads) => sum + threads,
-          0
-        );
-        if (totalThreadsAtTimestamp === maxUsers) {
-          rampEnd = timestamp;
-          break;
-        }
-      }
+      const data = await response.json();
 
-      const durationMs = rampEnd && rampStart ? rampEnd - rampStart : 0;
-      const rampUpInfo = {
-        users: maxUsers,
-        usersPerTest: maxUsersPerTest,
-        duration: formatDuration(durationMs),
-      };
-
-      startTime = new Date(minTime).toLocaleString("pt-BR");
-      endTime = new Date(maxTime).toLocaleString("pt-BR");
-
-      const updatedTimeSeriesData = seriesData.map((entry: any) => {
-        const activeThreadsKeys = Object.keys(entry).filter(key => key.startsWith("activeThreads_"));
-        const requestKeys = Object.keys(entry).filter(key => key.startsWith("requestsPerSecond_"));
-        const checkKeys = Object.keys(entry).filter(key => key.startsWith("checksPerSecond_"));
-        const errorKeys = Object.keys(entry).filter(key => key.startsWith("errorsPerSecond_"));
-        const elapsedKeys = Object.keys(entry).filter(key => key.startsWith("elapsed_"));
-        const latencyKeys = Object.keys(entry).filter(key => key.startsWith("latency_"));
-
-        const testData: any = { time: entry.time, timeStamp: Number(entry.timeStamp) };
-        activeThreadsKeys.forEach(key => {
-          testData[key] = Number(entry[key]) || 0;
-        });
-        requestKeys.forEach(key => {
-          testData[key] = Number(entry[key]) || 0;
-        });
-        checkKeys.forEach(key => {
-          testData[key] = Number(entry[key]) || 0;
-        });
-        errorKeys.forEach(key => {
-          testData[key] = Number(entry[key]) || 0;
-        });
-        elapsedKeys.forEach(key => {
-          testData[key] = Number(entry[key]) || 0;
-        });
-        latencyKeys.forEach(key => {
-          testData[key] = Number(entry[key]) || 0;
-        });
-
-        testData.totalActiveThreads = activeThreadsKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
-        testData.totalRequestsPerSecond = requestKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
-        testData.totalChecksPerSecond = checkKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
-        testData.totalErrorsPerSecond = errorKeys.reduce((sum, key) => sum + (Number(entry[key]) || 0), 0);
-
-        return testData;
-      });
-
-      setSuccessCount(successCount);
-      setErrorCount(errorCount);
-      setStartTime(startTime);
-      setEndTime(endTime);
-      setRampUpInfo(rampUpInfo);
-      setAggregateReport(aggregateReport);
-      setTimeSeriesData(updatedTimeSeriesData);
-      setErrorDetails(errorDetailsArray);
-    } catch (error) {
-      console.error("Erro ao processar o arquivo:", error);
-      setErrorMessage("Erro ao processar o arquivo. Tente novamente ou use um arquivo menor.");
+      setSuccessCount(data.successCount);
+      setErrorCount(data.errorCount);
+      setStartTime(data.startTime);
+      setEndTime(data.endTime);
+      setRampUpInfo(data.rampUpInfo);
+      setAggregateReport(data.aggregateReport);
+      setTimeSeriesData(data.timeSeriesData);
+      setErrorDetails(data.errorDetails);
+      if (data.framework) setDetectedFramework(data.framework);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Erro ao processar o arquivo.";
+      console.error("Erro ao processar o arquivo:", msg);
+      setErrorMessage(msg);
     } finally {
       setIsLoading(false);
       clearInterval(interval);
       setTimerInterval(null);
     }
+  };
+
+  const exportAggregateCSV = () => {
+    if (!aggregateReport.length) return;
+    const headers = ['Label', 'Amostras', 'Média (ms)', 'Mediana (ms)', 'P90 (ms)', 'P95 (ms)', 'Mínimo (ms)', 'Máximo (ms)', 'Taxa de Erro (%)', 'Throughput (req/s)', 'Latência Média (ms)', 'Bytes Médios'];
+    const rows = aggregateReport.map(r => [
+      `"${r.label.replace(/"/g, '""')}"`, r.count, r.average, r.median, r.p90, r.p95, r.min, r.max, r.errorRate, r.throughput, r.averageLatency, r.bytes,
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio-agregado-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const calculateStats = (data: any[], dataKeys: string[]) => {
@@ -834,7 +536,7 @@ export default function PerformanceDashboard() {
     if (!startTime || !endTime) {
       return (
         <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "20px", borderRadius: "8px", textAlign: "center", color: themeStyles[theme].text }}>
-          {errorMessage || "Nenhum dado carregado. Faça upload de um arquivo JTL."}
+          {errorMessage || "Nenhum dado carregado. Faça upload de um arquivo JTL, JSON, CSV ou LOG."}
         </div>
       );
     }
@@ -1025,7 +727,26 @@ export default function PerformanceDashboard() {
 
         {shouldShow("aggregate") && (
           <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "15px", borderRadius: "8px", marginBottom: "20px" }}>
-            <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", textAlign: "center", marginBottom: "15px" }}>Relatório Agregado - Tempos de Resposta</h3>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "14px", marginBottom: "15px" }}>
+              <h3 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", margin: 0 }}>Relatório Agregado - Tempos de Resposta</h3>
+              {aggregateReport.length > 0 && (
+                <button
+                  onClick={exportAggregateCSV}
+                  style={{
+                    padding: "5px 12px",
+                    borderRadius: "5px",
+                    border: `1px solid ${themeStyles[theme].border}`,
+                    backgroundColor: theme === "dark" ? "#2a4a6a" : "#e8f0fe",
+                    color: theme === "dark" ? "#76B7B2" : "#1a5276",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  ⬇ Exportar CSV
+                </button>
+              )}
+            </div>
             <div style={{ overflowX: "auto" }}>
               <ResponsiveContainer width="100%" height={500}>
                 <BarChart data={aggregateReport} layout="vertical" margin={{ top: 20, right: 30, left: 100, bottom: 20 }}>
@@ -1041,6 +762,35 @@ export default function PerformanceDashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            {aggregateReport.length > 0 && (
+              <div style={{ overflowX: "auto", marginTop: "20px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: theme === "dark" ? "#2a2a2a" : "#e8f0fe" }}>
+                      {['Label', 'Amostras', 'Média', 'Mediana', 'P90', 'P95', 'Mín', 'Máx', '% Erro', 'Throughput'].map(h => (
+                        <th key={h} style={{ padding: "8px 10px", textAlign: "left", color: theme === "dark" ? "#76B7B2" : "#1a5276", fontWeight: 600, whiteSpace: "nowrap", borderBottom: `2px solid ${themeStyles[theme].border}` }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aggregateReport.map((r, i) => (
+                      <tr key={r.label} style={{ backgroundColor: i % 2 === 0 ? themeStyles[theme].bg : themeStyles[theme].cardBg }}>
+                        <td style={{ padding: "7px 10px", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.label}>{r.label}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{r.count.toLocaleString('pt-BR')}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.average, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.median, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.p90, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.p95, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.min, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{formatValueWithUnit(r.max, "time")}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", color: r.errorRate > 5 ? themeStyles[theme].error : r.errorRate > 1 ? "#F28E2B" : themeStyles[theme].success, fontWeight: r.errorRate > 1 ? 600 : 400 }}>{r.errorRate.toFixed(2)}%</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right" }}>{r.throughput.toFixed(2)}/s</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -1097,10 +847,36 @@ export default function PerformanceDashboard() {
 
   return (
     <div style={{ padding: "20px", fontFamily: "Arial, sans-serif", maxWidth: "1400px", margin: "auto", backgroundColor: themeStyles[theme].bg, color: themeStyles[theme].text, minHeight: "100vh" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "30px" }}>
-        <h1 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", margin: 0 }}>📊 Dashboard de Performance - JMeter</h1>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <span style={{ marginRight: "10px", color: themeStyles[theme].text }}>{theme === "dark" ? "Escuro" : "Claro"}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "30px", flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <h1 style={{ color: theme === "dark" ? "#4E79A7" : "#1a5276", margin: "0 0 4px" }}>📊 Dashboard de Performance</h1>
+          <p style={{ margin: 0, fontSize: "13px", color: themeStyles[theme].text, opacity: 0.6 }}>
+            JMeter · K6 · Locust · Artillery · Newman · Gatling · Vegeta
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          {session?.user && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "13px", color: themeStyles[theme].text, opacity: 0.8 }}>
+                {session.user.name || session.user.email}
+              </span>
+              <button
+                onClick={() => signOut({ callbackUrl: "/login" })}
+                style={{
+                  padding: "4px 10px",
+                  fontSize: "12px",
+                  borderRadius: "4px",
+                  border: `1px solid ${themeStyles[theme].border}`,
+                  backgroundColor: "transparent",
+                  color: themeStyles[theme].text,
+                  cursor: "pointer",
+                }}
+              >
+                Sair
+              </button>
+            </div>
+          )}
+          <span style={{ fontSize: "13px", color: themeStyles[theme].text }}>{theme === "dark" ? "Escuro" : "Claro"}</span>
           <label style={{ position: "relative", display: "inline-block", width: "60px", height: "30px" }}>
             <input
               type="checkbox"
@@ -1135,10 +911,27 @@ export default function PerformanceDashboard() {
       </div>
 
       <div style={{ backgroundColor: themeStyles[theme].cardBg, padding: "20px", borderRadius: "8px", boxShadow: "0px 0px 10px rgba(0, 0, 0, 0.1)", marginBottom: "20px" }}>
-        <label style={{ display: "inline-block", padding: "10px 20px", backgroundColor: theme === "dark" ? "#4E79A7" : "#1a5276", color: "white", textAlign: "center", cursor: "pointer", borderRadius: "5px", fontSize: "16px", marginBottom: "20px" }}>
-          📂 Escolher Arquivo JTL
-          <input type="file" accept=".csv,.jtl" onChange={handleFileUpload} multiple style={{ display: "none" }} />
-        </label>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap", marginBottom: "20px" }}>
+          <label style={{ display: "inline-block", padding: "10px 20px", backgroundColor: theme === "dark" ? "#4E79A7" : "#1a5276", color: "white", textAlign: "center", cursor: "pointer", borderRadius: "5px", fontSize: "16px" }}>
+            📂 Escolher Arquivo de Teste
+            <input type="file" accept=".csv,.jtl,.json,.log" onChange={handleFileUpload} style={{ display: "none" }} />
+          </label>
+          <span style={{ fontSize: "12px", color: themeStyles[theme].text, opacity: 0.55 }}>
+            Suporta: JMeter (.jtl/.csv) · K6 (.json/.csv) · Locust (_stats.csv) · Artillery (.json) · Newman (.json) · Gatling (.log) · Vegeta (.json)
+          </span>
+          {detectedFramework && !isLoading && (
+            <span style={{
+              fontSize: "12px",
+              backgroundColor: theme === "dark" ? "#2a4a2a" : "#e8f5e9",
+              color: theme === "dark" ? "#59A14F" : "#2e7d32",
+              padding: "4px 10px",
+              borderRadius: "12px",
+              fontWeight: 500,
+            }}>
+              ✓ {detectedFramework} detectado
+            </span>
+          )}
+        </div>
 
         {fileSizeWarning && (
           <div style={{ backgroundColor: theme === "dark" ? "#3c3c3c" : "#f0f0f0", padding: "10px", borderRadius: "5px", marginBottom: "15px", color: "#F28E2B" }}>
