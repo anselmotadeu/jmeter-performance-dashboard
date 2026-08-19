@@ -73,6 +73,10 @@ export const k6JsonParser: PerformanceParser = {
   parse(content) {
     const items = parseLines(content);
     const waiting = metricValues(items, 'http_req_waiting');
+    const blocked = metricValues(items, 'http_req_blocked');
+    const connecting = metricValues(items, 'http_req_connecting');
+    const sending = metricValues(items, 'http_req_sending');
+    const receiving = metricValues(items, 'http_req_receiving');
     const failed = metricValues(items, 'http_req_failed');
     const consumed = new Map<string, number>();
     const vusBySecond = new Map<number, number>();
@@ -118,6 +122,10 @@ export const k6JsonParser: PerformanceParser = {
         bytesSent: null,
         responseCode: tags.status,
         responseMessage: success ? undefined : (tags.error || tags.error_code || (tags.status ? `HTTP ${tags.status}` : 'Falha k6')),
+        blocked: blocked.get(key)?.[index] ?? null,
+        connecting: connecting.get(key)?.[index] ?? null,
+        sending: sending.get(key)?.[index] ?? null,
+        receiving: receiving.get(key)?.[index] ?? null,
       });
     }
     return points;

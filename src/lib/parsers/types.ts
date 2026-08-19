@@ -21,6 +21,38 @@ export type NormalizedPoint = {
   bytesSent: number | null;
   responseCode?: string;
   responseMessage?: string;
+  blocked?: number | null;
+  connecting?: number | null;
+  sending?: number | null;
+  receiving?: number | null;
+};
+
+export type HttpPhase = "duration" | "blocked" | "connecting" | "sending" | "waiting" | "receiving";
+
+export type MetricStats = {
+  metric: HttpPhase;
+  label: string;
+  mean: number | null;
+  median: number | null;
+  p90: number | null;
+  p95: number | null;
+  min: number | null;
+  max: number | null;
+  count: number;
+};
+
+export type HeatmapBin = {
+  t0: number;
+  t1: number;
+  counts: number[];
+};
+
+export type Heatmap = {
+  metric: HttpPhase;
+  label: string;
+  unit: string;
+  buckets: number[];
+  series: HeatmapBin[];
 };
 
 export type AggregateReportItem = {
@@ -73,6 +105,8 @@ export type AnalysisResult = {
   rampUpInfo: { users: number; usersPerTest: number; duration: string };
   aggregateReport: AggregateReportItem[];
   timeSeriesData: TimeSeriesEntry[];
+  heatmaps: Heatmap[];
+  phaseStats: MetricStats[];
   errorDetails: ErrorDetail[];
   labels: string[];
   checks: CheckResult[];

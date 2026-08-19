@@ -82,6 +82,26 @@ describe("certified parsers", () => {
     });
   });
 
+  it("extracts HTTP phases, heatmaps and per-second p95 from K6 NDJSON", () => {
+    const result = parseAndAnalyze(fixture("k6-sample-full.ndjson"));
+    expect(result.framework).toBe("k6 NDJSON");
+    expect(result.successCount).toBe(2);
+    expect(result.errorCount).toBe(1);
+    const duration = result.phaseStats.find((item) => item.metric === "duration");
+    expect(duration?.count).toBe(3);
+    expect(duration?.mean).toBeCloseTo(666.7, 1);
+    expect(duration?.p95).toBe(1200);
+    expect(result.phaseStats.filter((item) => item.count > 0).length).toBe(6);
+    const heatmapCount = result.heatmaps.length;
+    expect(heatmapCount).toBeGreaterThanOrEqual(6);
+    expect(result.heatmaps[0].series.length).toBeGreaterThan(0);
+    const first = result.timeSeriesData[0];
+    expect(first.vus).toBe(15);
+    expect(first.rps).toBe(1);
+    expect(first.durationP95).toBeDefined();
+    expect(first.blockedAvg).toBeDefined();
+  });
+
   it("rejects unrecognized and empty inputs", () => {
     expect(() => parseAndAnalyze("not a performance file")).toThrow(
       /Formato não reconhecido/,

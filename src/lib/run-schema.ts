@@ -1,6 +1,35 @@
 import { z } from "zod";
 
+const phaseEnum = z.enum(["duration", "blocked", "connecting", "sending", "waiting", "receiving"]);
 const optionalMetric = z.number().finite().nonnegative().nullable();
+
+const heatmap = z.object({
+  metric: phaseEnum,
+  label: z.string().max(60),
+  unit: z.string().max(10),
+  buckets: z.array(z.number().finite()).max(64),
+  series: z
+    .array(
+      z.object({
+        t0: z.number().finite(),
+        t1: z.number().finite(),
+        counts: z.array(z.number().int().nonnegative()).max(64),
+      }),
+    )
+    .max(30),
+});
+
+const phaseStat = z.object({
+  metric: phaseEnum,
+  label: z.string().max(60),
+  mean: z.number().finite().nullable(),
+  median: z.number().finite().nullable(),
+  p90: z.number().finite().nullable(),
+  p95: z.number().finite().nullable(),
+  min: z.number().finite().nullable(),
+  max: z.number().finite().nullable(),
+  count: z.number().int().nonnegative(),
+});
 const aggregate = z.object({
   label: z.string().trim().min(1).max(300),
   average: z.number().finite().nonnegative(),
@@ -67,6 +96,8 @@ export const saveRunSchema = z.object({
       )
       .max(500),
     labels: z.array(z.string().max(300)).max(500),
+    heatmaps: z.array(heatmap).max(10),
+    phaseStats: z.array(phaseStat).max(10),
     checks: z
       .array(
         z.object({

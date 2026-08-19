@@ -124,12 +124,19 @@ export async function getRunDetail(userId: string, runId: string) {
       diagnostics: string[];
       startedAt: Date | null;
       endedAt: Date | null;
+      snapshot: {
+        aggregateReport?: unknown[];
+        timeSeriesData?: unknown[];
+        heatmaps?: unknown[];
+        phaseStats?: unknown[];
+      } | null;
     }
   >(
     `SELECT r.id,r.title,r.framework,r.source_format AS "sourceFormat",r.data_quality AS "dataQuality",
       r.success_count::float8 AS "successCount",r.error_count::float8 AS "errorCount",r.duration_ms::float8 AS "durationMs",
       r.max_users AS "maxUsers",r.created_at AS "createdAt",r.capabilities,r.diagnostics,
-      r.started_at AS "startedAt",r.ended_at AS "endedAt",p.id AS "projectId",p.name AS "projectName",(b.run_id=r.id) AS "isBaseline"
+      r.started_at AS "startedAt",r.ended_at AS "endedAt",r.analysis_snapshot AS "snapshot",
+      p.id AS "projectId",p.name AS "projectName",(b.run_id=r.id) AS "isBaseline"
      FROM analysis_run r JOIN project p ON p.id=r.project_id JOIN workspace_member m ON m.workspace_id=p.workspace_id
      LEFT JOIN baseline b ON b.project_id=p.id WHERE m.user_id=$1 AND r.id=$2`,
     [userId, runId],
@@ -164,5 +171,6 @@ export async function getRunDetail(userId: string, runId: string) {
     checks: checks.rows,
     thresholds: thresholds.rows,
     comparison: comparison.rows[0] ?? null,
+    snapshot: run.rows[0].snapshot ?? null,
   };
 }

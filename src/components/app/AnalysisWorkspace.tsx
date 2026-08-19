@@ -9,19 +9,8 @@ import {
   LoaderCircle,
   Save,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { parseAndAnalyze, type AnalysisResult } from "@/lib/parsers";
+import PerformanceDashboard from "@/components/app/PerformanceDashboard";
 async function parseFile(file:File){
   if(typeof Worker==='undefined')return parseAndAnalyze(await file.text());
   const worker=new Worker(new URL('../../workers/parser.worker.ts',import.meta.url),{type:'module'});
@@ -292,69 +281,7 @@ export default function AnalysisWorkspace() {
               {item}
             </p>
           ))}
-          <section className="grid gap-5 xl:grid-cols-2">
-            <ChartCard title="Tempo médio por endpoint">
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart data={result.aggregateReport}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="label" hide />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar
-                    dataKey="average"
-                    name="Média (ms)"
-                    fill="#4f46e5"
-                    radius={[6, 6, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="p95"
-                    name="P95 (ms)"
-                    fill="#06b6d4"
-                    radius={[6, 6, 0, 0]}
-                  />
-                  <Legend />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-            {result.capabilities.timeSeries ? (
-              <ChartCard title="Evolução temporal">
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={result.timeSeriesData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" hide />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    {result.labels.slice(0, 8).map((label, index) => (
-                      <Line
-                        key={label}
-                        type="monotone"
-                        dataKey={`elapsed_${label}`}
-                        name={label}
-                        stroke={
-                          [
-                            "#4f46e5",
-                            "#06b6d4",
-                            "#10b981",
-                            "#f59e0b",
-                            "#ef4444",
-                            "#8b5cf6",
-                            "#ec4899",
-                            "#64748b",
-                          ][index]
-                        }
-                        dot={false}
-                      />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            ) : (
-              <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed p-8 text-center text-slate-500">
-                Summary agregado não possui série temporal.
-              </div>
-            )}
-          </section>
+          <PerformanceDashboard data={result} />
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h2 className="text-xl font-black">Endpoints</h2>
             <div className="mt-4 overflow-x-auto">
@@ -413,20 +340,6 @@ function Metric({
       >
         {value}
       </div>
-    </div>
-  );
-}
-function ChartCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <h2 className="mb-4 text-lg font-black">{title}</h2>
-      {children}
     </div>
   );
 }

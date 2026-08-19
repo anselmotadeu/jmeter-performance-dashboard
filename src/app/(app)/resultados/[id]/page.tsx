@@ -4,6 +4,9 @@ import { z } from "zod";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import PageHeader from "@/components/app/PageHeader";
 import BaselineButton from "@/components/app/BaselineButton";
+import PerformanceDashboard, {
+  type DashboardData,
+} from "@/components/app/PerformanceDashboard";
 import { auth } from "@/lib/auth";
 import { getRunDetail } from "@/lib/run-data";
 
@@ -18,7 +21,19 @@ export default async function RunDetailPage({
   if (!z.uuid().safeParse(id).success) notFound();
   const detail = await getRunDetail(session.user.id, id);
   if (!detail) notFound();
-  const { run, labels, errors, checks, thresholds, comparison } = detail;
+  const { run, labels, errors, checks, thresholds, comparison, snapshot } = detail;
+
+  const dashboardData: DashboardData | null = snapshot
+    ? {
+        capabilities: run.capabilities,
+        timeSeriesData: (snapshot.timeSeriesData ?? []) as DashboardData["timeSeriesData"],
+        heatmaps: (snapshot.heatmaps ?? []) as DashboardData["heatmaps"],
+        phaseStats: (snapshot.phaseStats ?? []) as DashboardData["phaseStats"],
+        aggregateReport: (snapshot.aggregateReport ??
+          labels) as DashboardData["aggregateReport"],
+        labels: labels.map((label) => label.label),
+      }
+    : null;
 
   return (
     <div className="space-y-7">
@@ -100,6 +115,13 @@ export default async function RunDetailPage({
             </div>
           ) : null}
         </section>
+      )}
+      {dashboardData ? (
+        <PerformanceDashboard data={dashboardData} />
+      ) : (
+        <div className="rounded-2xl border border-dashed bg-white p-6 text-center text-sm text-slate-500 dark:bg-slate-900">
+          Gráficos indisponíveis para esta análise (execução antiga ou sem snapshot).
+        </div>
       )}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-xl font-black">Métricas por endpoint</h2>

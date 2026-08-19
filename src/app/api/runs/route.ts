@@ -114,8 +114,8 @@ export async function POST(request: Request) {
     const safeAggregates = analysis.aggregateReport.map((item) => ({ ...item, label: sanitizeLabel(item.label) }));
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO analysis_run (project_id,created_by,idempotency_key,payload_hash,title,framework,source_format,data_quality,
-        original_file_name,file_size,schema_version,capabilities,diagnostics,success_count,error_count,started_at,ended_at,duration_ms,max_users)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        original_file_name,file_size,schema_version,capabilities,diagnostics,success_count,error_count,started_at,ended_at,duration_ms,max_users,analysis_snapshot)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (created_by,idempotency_key) DO NOTHING RETURNING id`,
       [
         project.rows[0].id,
@@ -137,6 +137,12 @@ export async function POST(request: Request) {
         analysis.endTimestamp ? new Date(analysis.endTimestamp) : null,
         analysis.durationMs,
         analysis.rampUpInfo.users,
+        JSON.stringify({
+          aggregateReport: safeAggregates,
+          timeSeriesData: analysis.timeSeriesData,
+          heatmaps: analysis.heatmaps,
+          phaseStats: analysis.phaseStats,
+        }),
       ],
     );
     if (!inserted.rows[0]) {

@@ -1,0 +1,30 @@
+{"type":"Metric","metric":"http_req_duration","data":{"type":"trend","contains":"time"}}
+{"type":"Metric","metric":"http_req_blocked","data":{"type":"trend","contains":"time"}}
+{"type":"Metric","metric":"http_req_connecting","data":{"type":"trend","contains":"time"}}
+{"type":"Metric","metric":"http_req_sending","data":{"type":"trend","contains":"time"}}
+{"type":"Metric","metric":"http_req_waiting","data":{"type":"trend","contains":"time"}}
+{"type":"Metric","metric":"http_req_receiving","data":{"type":"trend","contains":"time"}}
+{"type":"Point","metric":"vus","data":{"time":"2025-10-09T08:53:20.000Z","value":15,"tags":{}}}
+{"type":"Point","metric":"vus","data":{"time":"2025-10-09T08:53:21.000Z","value":25,"tags":{}}}
+{"type":"Point","metric":"vus","data":{"time":"2025-10-09T08:53:22.000Z","value":25,"tags":{}}}
+{"type":"Point","metric":"http_req_duration","data":{"time":"2025-10-09T08:53:20.300Z","value":300,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_blocked","data":{"time":"2025-10-09T08:53:20.300Z","value":8,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_connecting","data":{"time":"2025-10-09T08:53:20.300Z","value":15,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_sending","data":{"time":"2025-10-09T08:53:20.300Z","value":50,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_waiting","data":{"time":"2025-10-09T08:53:20.300Z","value":200,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_receiving","data":{"time":"2025-10-09T08:53:20.300Z","value":50,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_failed","data":{"time":"2025-10-09T08:53:20.300Z","value":0,"tags":{"name":"GET /api/orders","method":"GET","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_duration","data":{"time":"2025-10-09T08:53:21.500Z","value":500,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_blocked","data":{"time":"2025-10-09T08:53:21.500Z","value":0,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_connecting","data":{"time":"2025-10-09T08:53:21.500Z","value":5,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_sending","data":{"time":"2025-10-09T08:53:21.500Z","value":60,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_waiting","data":{"time":"2025-10-09T08:53:21.500Z","value":400,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_receiving","data":{"time":"2025-10-09T08:53:21.500Z","value":40,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_failed","data":{"time":"2025-10-09T08:53:21.500Z","value":0,"tags":{"name":"POST /api/cart","method":"POST","status":"200","expected_response":"true"}}}
+{"type":"Point","metric":"http_req_duration","data":{"time":"2025-10-09T08:53:22.200Z","value":1200,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_blocked","data":{"time":"2025-10-09T08:53:22.200Z","value":250,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_connecting","data":{"time":"2025-10-09T08:53:22.200Z","value":100,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_sending","data":{"time":"2025-10-09T08:53:22.200Z","value":70,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_waiting","data":{"time":"2025-10-09T08:53:22.200Z","value":700,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_receiving","data":{"time":"2025-10-09T08:53:22.200Z","value":130,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}
+{"type":"Point","metric":"http_req_failed","data":{"time":"2025-10-09T08:53:22.200Z","value":1,"tags":{"name":"GET /api/catalog","method":"GET","status":"503","expected_response":"false","error":"service unavailable"}}}

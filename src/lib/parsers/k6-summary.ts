@@ -68,6 +68,8 @@ function makeResult(input: {
       p95Latency: null, bytes: null, sentBytes: null,
     }],
     timeSeriesData: [],
+    heatmaps: [],
+    phaseStats: [],
     errorDetails: input.errors ? [{ code: 'K6', message: 'Requisições marcadas como falhas no summary.', count: input.errors }] : [],
     labels: ['Geral'],
     checks: input.checks,

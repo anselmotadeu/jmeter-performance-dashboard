@@ -1,0 +1,1 @@
+alter table analysis_run add column if not exists analysis_snapshot jsonb;

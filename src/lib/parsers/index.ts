@@ -8,12 +8,12 @@ import { newmanParser } from './newman';
 import { gatlingParser } from './gatling';
 import { vegetaParser } from './vegeta';
 import type {
-  AggregateReportItem, AnalysisCapabilities, AnalysisResult, ErrorDetail, NormalizedPoint,
-  PerformanceParser, TimeSeriesEntry,
+  AggregateReportItem, AnalysisCapabilities, AnalysisResult, ErrorDetail, Heatmap, HeatmapBin,
+  HttpPhase, MetricStats, NormalizedPoint, PerformanceParser, TimeSeriesEntry,
 } from './types';
 import { sanitizeLabel, sanitizeMessage } from '@/lib/sanitize';
 
-export type { AggregateReportItem, AnalysisCapabilities, AnalysisResult, NormalizedPoint, PerformanceParser, TimeSeriesEntry };
+export type { AggregateReportItem, AnalysisCapabilities, AnalysisResult, ErrorDetail, Heatmap, HttpPhase, MetricStats, NormalizedPoint, PerformanceParser, TimeSeriesEntry };
 
 const PARSERS: PerformanceParser[] = [
   jmeterParser,
@@ -117,6 +117,65 @@ type BucketLabel = {
   errorsByMessage: Map<string, number>;
 };
 
+export const HTTP_PHASES: HttpPhase[] = ['duration', 'blocked', 'connecting', 'sending', 'waiting', 'receiving'];
+
+export const HEATMAP_BINS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000];
+
+const PHASE_LABELS: Record<HttpPhase, string> = {
+  duration: 'Tempo de resposta',
+  blocked: 'Bloqueado',
+  connecting: 'Conectando',
+  sending: 'Enviando',
+  waiting: 'Esperando',
+  receiving: 'Recebendo',
+};
+
+const PHASE_BIN_CAP = 512;
+
+function phaseValue(point: NormalizedPoint, phase: HttpPhase): number | null {
+  switch (phase) {
+    case 'duration': return point.elapsed;
+    case 'blocked': return point.blocked ?? null;
+    case 'connecting': return point.connecting ?? null;
+    case 'sending': return point.sending ?? null;
+    case 'waiting': return point.latency ?? null;
+    case 'receiving': return point.receiving ?? null;
+  }
+}
+
+function reservoirPush(values: number[], value: number, cap: number) {
+  if (values.length < cap) {
+    values.push(value);
+    return;
+  }
+  const index = Math.floor(Math.random() * (values.length + 1));
+  if (index < cap) values[index] = value;
+}
+
+function sortUnique(values: number[]) {
+  return values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+}
+
+type GlobalSecond = {
+  requests: number;
+  errors: number;
+  vus: number;
+  avg: Partial<Record<HttpPhase, { sum: number; n: number }>>;
+  samples: Partial<Record<HttpPhase, number[]>>;
+};
+
+function emptyPhaseAgg() {
+  return { sum: 0, n: 0 };
+}
+
+function binIndex(value: number, bins: number[]) {
+  if (value < bins[0]) return 0;
+  for (let i = 0; i < bins.length; i++) {
+    if (value < bins[i]) return i;
+  }
+  return bins.length;
+}
+
 export function computeAnalysis(
   points: NormalizedPoint[],
   framework: string,
@@ -131,7 +190,7 @@ export function computeAnalysis(
       diagnostics: ['Nenhuma amostra válida encontrada.'], successCount: 0, errorCount: 0,
       startTime: '', endTime: '', startTimestamp: null, endTimestamp: null, durationMs: 0,
       rampUpInfo: { users: 0, usersPerTest: 0, duration: '0s' }, aggregateReport: [],
-      timeSeriesData: [], errorDetails: [], labels: [], checks: [], thresholds: [],
+      timeSeriesData: [], heatmaps: [], phaseStats: [], errorDetails: [], labels: [], checks: [], thresholds: [],
     };
   }
 
@@ -142,6 +201,14 @@ export function computeAnalysis(
   const groups = new Map<string, Group>();
   const buckets = new Map<number, Map<string, BucketLabel>>();
   const errorTotals = new Map<string, number>();
+
+  const globalSeconds = new Map<number, GlobalSecond>();
+  const phaseAllValues: Partial<Record<HttpPhase, number[]>> = {};
+  const heatCounts: Partial<Record<HttpPhase, Map<number, Map<number, number>>>> = {};
+  for (const phase of HTTP_PHASES) {
+    phaseAllValues[phase] = [];
+    heatCounts[phase] = new Map();
+  }
 
   for (const point of points) {
     if (!Number.isFinite(point.timestamp) || !Number.isFinite(point.elapsed) || point.elapsed < 0) continue;
@@ -201,6 +268,31 @@ export function computeAnalysis(
       labelBucket.errorsByMessage.set(key, (labelBucket.errorsByMessage.get(key) ?? 0) + 1);
       errorTotals.set(key, (errorTotals.get(key) ?? 0) + 1);
     }
+
+    let globalSecond = globalSeconds.get(bucketTime);
+    if (!globalSecond) {
+      globalSecond = { requests: 0, errors: 0, vus: 0, avg: {}, samples: {} };
+      globalSeconds.set(bucketTime, globalSecond);
+    }
+    globalSecond.requests++;
+    if (!point.success) globalSecond.errors++;
+    if (point.activeUsers !== null)
+      globalSecond.vus = Math.max(globalSecond.vus, point.activeUsers);
+
+    for (const phase of HTTP_PHASES) {
+      const value = phaseValue(point, phase);
+      if (value === null || !Number.isFinite(value) || value < 0) continue;
+      phaseAllValues[phase]!.push(value);
+      const agg = (globalSecond.avg[phase] ??= emptyPhaseAgg());
+      agg.sum += value;
+      agg.n++;
+      if (!globalSecond.samples[phase]) globalSecond.samples[phase] = [];
+      reservoirPush(globalSecond.samples[phase]!, value, PHASE_BIN_CAP);
+      const index = binIndex(value, HEATMAP_BINS);
+      const binCounts = heatCounts[phase]!.get(bucketTime) ?? new Map<number, number>();
+      binCounts.set(index, (binCounts.get(index) ?? 0) + 1);
+      heatCounts[phase]!.set(bucketTime, binCounts);
+    }
   }
 
   if (!Number.isFinite(minTime) || !groups.size) return computeAnalysis([], framework, sourceFormat, capabilities, dataQuality);
@@ -234,7 +326,24 @@ export function computeAnalysis(
     const entry: TimeSeriesEntry = {
       time: new Date(timestamp).toISOString(), timeStamp: timestamp, totalActiveThreads: 0,
       totalRequestsPerSecond: 0, totalChecksPerSecond: 0, totalErrorsPerSecond: 0,
+      rps: 0, vus: 0, errs: 0,
     };
+    const global = globalSeconds.get(timestamp);
+    if (global) {
+      entry.rps = global.requests;
+      entry.vus = global.vus;
+      entry.errs = global.errors;
+      for (const phase of HTTP_PHASES) {
+        const agg = global.avg[phase];
+        if (agg && agg.n) entry[`${phase}Avg`] = Number((agg.sum / agg.n).toFixed(3));
+        const samples = sortUnique(global.samples[phase] ?? []);
+        if (samples.length) {
+          entry[`${phase}Max`] = samples[samples.length - 1];
+          entry[`${phase}P90`] = percentile(samples, 0.9);
+          entry[`${phase}P95`] = percentile(samples, 0.95);
+        }
+      }
+    }
     for (const label of labels) {
       const item = bucket.get(label);
       const requests = item?.requests ?? 0;
@@ -255,6 +364,44 @@ export function computeAnalysis(
     return entry;
   });
 
+  const heatmaps: Heatmap[] = [];
+  for (const phase of HTTP_PHASES) {
+    const values = phaseAllValues[phase]!;
+    const counts = heatCounts[phase]!;
+    if (!values.length || !counts.size) continue;
+    const seconds = Array.from(counts.keys()).sort((a, b) => a - b);
+    const spanMs = Math.max(1000, (seconds[seconds.length - 1] - seconds[0]) + 1000);
+    const numBins = Math.min(24, Math.max(6, Math.round(spanMs / 5000)));
+    const binSize = spanMs / numBins;
+    const series: HeatmapBin[] = Array.from({ length: numBins }, (_, i) => ({
+      t0: seconds[0] + i * binSize,
+      t1: seconds[0] + (i + 1) * binSize,
+      counts: new Array<number>(HEATMAP_BINS.length + 1).fill(0),
+    }));
+    for (const [second, valueBins] of counts.entries()) {
+      const binIndexNow = Math.min(numBins - 1, Math.max(0, Math.floor((second - seconds[0]) / binSize)));
+      const target = series[binIndexNow];
+      for (const [valueBin, count] of valueBins.entries()) target.counts[valueBin] += count;
+    }
+    heatmaps.push({ metric: phase, label: PHASE_LABELS[phase], unit: 'ms', buckets: HEATMAP_BINS, series });
+  }
+
+  const phaseStats: MetricStats[] = HTTP_PHASES.map((phase) => {
+    const sorted = sortUnique(phaseAllValues[phase] ?? []);
+    if (!sorted.length) return { metric: phase, label: PHASE_LABELS[phase], mean: null, median: null, p90: null, p95: null, min: null, max: null, count: 0 };
+    return {
+      metric: phase,
+      label: PHASE_LABELS[phase],
+      mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
+      median: median(sorted),
+      p90: percentile(sorted, 0.9),
+      p95: percentile(sorted, 0.95),
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      count: sorted.length,
+    };
+  });
+
   const errorDetails: ErrorDetail[] = Array.from(errorTotals.entries()).map(([key, count]) => {
     const [code, ...message] = key.split(': ');
     return { code, message: message.join(': '), count };
@@ -270,7 +417,7 @@ export function computeAnalysis(
     successCount, errorCount, startTime: new Date(minTime).toISOString(), endTime: new Date(maxTime).toISOString(),
     startTimestamp: minTime, endTimestamp: maxTime, durationMs,
     rampUpInfo: { users: maxUsers, usersPerTest: maxUsers, duration: formatDuration(firstActive !== null && maxActive !== null ? maxActive - firstActive : 0) },
-    aggregateReport, timeSeriesData, errorDetails, labels, checks: [], thresholds: [],
+    aggregateReport, timeSeriesData, heatmaps, phaseStats, errorDetails, labels, checks: [], thresholds: [],
   };
 }
 
