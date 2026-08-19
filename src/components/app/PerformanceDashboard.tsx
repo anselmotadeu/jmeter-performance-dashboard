@@ -15,19 +15,26 @@ import {
 } from "recharts";
 import type {
   AggregateReportItem,
+  AnalysisCapabilities,
   Heatmap,
   HttpPhase,
   MetricStats,
   TimeSeriesEntry,
 } from "@/lib/parsers";
+import { analyzeTest, type AnalysisSummary, type Insight } from "@/lib/analysis";
 
 export type DashboardData = {
-  capabilities: Record<string, boolean>;
+  capabilities: Partial<AnalysisCapabilities>;
   timeSeriesData: TimeSeriesEntry[];
   heatmaps: Heatmap[];
   phaseStats: MetricStats[];
   aggregateReport: AggregateReportItem[];
   labels: string[];
+  startTime?: string;
+  endTime?: string;
+  durationMs?: number;
+  successCount?: number;
+  errorCount?: number;
 };
 
 const PHASE_ORDER: HttpPhase[] = ["duration", "blocked", "connecting", "receiving", "sending", "waiting"];
@@ -41,7 +48,6 @@ const PHASE_METRIC_NAME: Record<HttpPhase, string> = {
   waiting: "http_req_waiting",
 };
 
-// Grafana-style series colors: max=green, p95=blue, p90=gold, min=slate
 const OVER_TIME_SERIES = [
   { key: "Min", name: "min", color: "#94a3b8" },
   { key: "P90", name: "p90", color: "#f59e0b" },
@@ -62,14 +68,47 @@ function formatAxisLabel(value: unknown) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function formatNumber(value: number) {
+  return Number(value.toFixed(1)).toLocaleString("pt-BR");
+}
+
+function severityColor(severity: string): string {
+  switch (severity) {
+    case "excellent": return "#10b981";
+    case "good": return "#3b82f6";
+    case "warning": return "#f59e0b";
+    case "critical": return "#ef4444";
+    default: return "#64748b";
+  }
+}
+
+function severityBg(severity: string): string {
+  switch (severity) {
+    case "excellent": return "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900";
+    case "good": return "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-900";
+    case "warning": return "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-900";
+    case "critical": return "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-900";
+    default: return "bg-slate-50 border-slate-200 dark:bg-slate-800 dark:border-slate-700";
+  }
+}
+
+function severityLabel(severity: string): string {
+  switch (severity) {
+    case "excellent": return "Excelente";
+    case "good": return "Bom";
+    case "warning": return "Atenção";
+    case "critical": return "Crítico";
+    default: return severity;
+  }
+}
+
 export default function PerformanceDashboard({ data }: { data: DashboardData }) {
-  const { timeSeriesData, heatmaps, phaseStats, aggregateReport, capabilities, labels } = data;
-  const hasTime = capabilities.timeSeries && timeSeriesData.length > 0;
+  const { timeSeriesData, heatmaps, phaseStats, aggregateReport, capabilities, labels, startTime, endTime, durationMs, successCount, errorCount } = data;
+  const hasTime = Boolean(capabilities.timeSeries && timeSeriesData.length > 0);
   const hasVus = hasTime && timeSeriesData.some((item) => Number(item.vus) > 0);
   const hasRps = hasTime && timeSeriesData.some((item) => Number(item.rps) > 0);
   const hasErrors = hasTime && timeSeriesData.some((item) => Number(item.errs) > 0);
-  const hasChecks =
-    hasTime && timeSeriesData.some((item) => Number(item.checks) > 0 || Number(item.checksFailed) > 0);
+  const hasChecks = hasTime && timeSeriesData.some((item) => Number(item.checks) > 0 || Number(item.checksFailed) > 0);
 
   const phaseStatsMap = new Map(phaseStats.map((phase) => [phase.metric, phase]));
   const heatmapMap = new Map(heatmaps.map((heatmap) => [heatmap.metric, heatmap]));
@@ -80,8 +119,37 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
     return hasTime && timeSeriesData.some((item) => item[`${phase}Avg`] !== undefined);
   });
 
+  const analysis: AnalysisSummary | null = (successCount !== undefined && errorCount !== undefined && durationMs !== undefined)
+    ? analyzeTest({
+        schemaVersion: 2,
+        framework: "",
+        sourceFormat: "",
+        dataQuality: "certified",
+        capabilities,
+        diagnostics: [],
+        successCount,
+        errorCount,
+        startTime: startTime || "",
+        endTime: endTime || "",
+        startTimestamp: null,
+        endTimestamp: null,
+        durationMs: durationMs || 0,
+        rampUpInfo: { users: 0, usersPerTest: 0, duration: "" },
+        aggregateReport,
+        timeSeriesData,
+        heatmaps,
+        phaseStats,
+        errorDetails: [],
+        labels,
+        checks: [],
+        thresholds: [],
+      })
+    : null;
+
   return (
     <div className="space-y-6">
+      {analysis && <AnalysisSection analysis={analysis} />}
+
       <div>
         <h2 className="text-xl font-black">Visão geral</h2>
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -113,6 +181,27 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
           ) : null}
         </div>
       </div>
+
+      {hasVus && timeSeriesData.length > 1 && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-4 text-lg font-black">Rampa de usuários virtuais</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={timeSeriesData}>
+              <defs>
+                <linearGradient id="vusGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.45} />
+                  <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="time" tickFormatter={formatAxisLabel} />
+              <YAxis />
+              <Tooltip formatter={(value) => formatNumber(Number(value))} labelFormatter={formatAxisLabel} />
+              <Area type="monotone" dataKey="vus" name="VUs" stroke="#4f46e5" fill="url(#vusGradient)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </section>
+      )}
 
       {metricPhases.length > 0 && (
         <div>
@@ -174,6 +263,81 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+function AnalysisSection({ analysis }: { analysis: AnalysisSummary }) {
+  const { overallSeverity, insights, capacity, duration } = analysis;
+
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-2xl border-2 p-5 ${severityBg(overallSeverity)}`}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-2xl font-black">Análise do teste</h2>
+            <p className="mt-1 text-sm opacity-80">
+              {duration.startTime && duration.endTime && (
+                <>
+                  <strong>Início:</strong> {new Date(duration.startTime).toLocaleString("pt-BR")} ·{" "}
+                  <strong>Fim:</strong> {new Date(duration.endTime).toLocaleString("pt-BR")} ·{" "}
+                  <strong>Duração:</strong> {duration.durationFormatted}
+                </>
+              )}
+            </p>
+          </div>
+          <div className="rounded-xl bg-white/80 px-4 py-2 text-center dark:bg-slate-900/80">
+            <div className="text-xs font-bold uppercase opacity-70">Status</div>
+            <div className="text-lg font-black" style={{ color: severityColor(overallSeverity) }}>
+              {severityLabel(overallSeverity)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl bg-white/60 p-3 dark:bg-slate-900/60">
+            <div className="text-xs font-bold uppercase opacity-70">Capacidade máxima</div>
+            <div className="text-2xl font-black">{capacity.maxConcurrentUsers}</div>
+            <div className="text-xs opacity-70">usuários simultâneos</div>
+          </div>
+          <div className="rounded-xl bg-white/60 p-3 dark:bg-slate-900/60">
+            <div className="text-xs font-bold uppercase opacity-70">Throughput máximo</div>
+            <div className="text-2xl font-black">{capacity.maxRequestsPerSecond.toFixed(1)}</div>
+            <div className="text-xs opacity-70">req/s</div>
+          </div>
+          {capacity.bottleneckAt !== undefined && (
+            <div className="rounded-xl bg-white/60 p-3 dark:bg-slate-900/60">
+              <div className="text-xs font-bold uppercase opacity-70">Limite identificado</div>
+              <div className="text-2xl font-black" style={{ color: severityColor("warning") }}>
+                {capacity.bottleneckAt}
+              </div>
+              <div className="text-xs opacity-70">usuários (erros começam aqui)</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {insights.length > 0 && (
+        <div className="grid gap-3 md:grid-cols-2">
+          {insights.map((insight, index) => (
+            <InsightCard key={index} insight={insight} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InsightCard({ insight }: { insight: Insight }) {
+  return (
+    <div className={`rounded-xl border p-4 ${severityBg(insight.severity)}`}>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 h-2 w-2 rounded-full flex-shrink-0" style={{ background: severityColor(insight.severity) }} />
+        <div className="flex-1">
+          <h4 className="font-bold">{insight.title}</h4>
+          <p className="mt-1 text-sm opacity-80">{insight.message}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -265,10 +429,6 @@ function TimeSeriesArea({ data, dataKey, color, name }: { data: TimeSeriesEntry[
   );
 }
 
-function formatNumber(value: number) {
-  return Number(value.toFixed(1)).toLocaleString("pt-BR");
-}
-
 function StatPanel({ title, metric, danger, children }: { title: string; metric: string; danger?: boolean; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -326,10 +486,15 @@ function HeatmapChart({ heatmap }: { heatmap: Heatmap }) {
                 return (
                   <div
                     key={`${label}-${bin.t0}`}
-                    title={`${label} · ${timeFormat.format(bin.t0)} · ${count}`}
-                    className="m-px rounded-[3px]"
+                    className="group relative m-px rounded-[3px]"
                     style={{ background: cellColor(count, maxCount) }}
-                  />
+                  >
+                    <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-2 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-slate-100 dark:text-slate-900">
+                      <div className="font-bold">{label}</div>
+                      <div>{timeFormat.format(bin.t0)}</div>
+                      <div className="mt-1 font-black">{count} requisições</div>
+                    </div>
+                  </div>
                 );
               })}
             </div>

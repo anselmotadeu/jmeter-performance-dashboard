@@ -32,6 +32,11 @@ export default async function RunDetailPage({
         aggregateReport: (snapshot.aggregateReport ??
           labels) as DashboardData["aggregateReport"],
         labels: labels.map((label) => label.label),
+        startTime: (snapshot as Record<string, unknown>).startTime as string,
+        endTime: (snapshot as Record<string, unknown>).endTime as string,
+        durationMs: (snapshot as Record<string, unknown>).durationMs as number,
+        successCount: (snapshot as Record<string, unknown>).successCount as number,
+        errorCount: (snapshot as Record<string, unknown>).errorCount as number,
       }
     : null;
 
