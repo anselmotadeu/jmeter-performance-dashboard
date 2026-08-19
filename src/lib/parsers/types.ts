@@ -25,6 +25,8 @@ export type NormalizedPoint = {
   connecting?: number | null;
   sending?: number | null;
   receiving?: number | null;
+  /** 1 = check pass, 0 = check fail. When present the point is a k6 check event, not a request sample. */
+  checks?: number;
 };
 
 export type HttpPhase = "duration" | "blocked" | "connecting" | "sending" | "waiting" | "receiving";

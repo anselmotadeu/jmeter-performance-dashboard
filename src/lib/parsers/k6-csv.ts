@@ -129,6 +129,25 @@ export const k6CsvParser: PerformanceParser = {
       });
     }
 
+    for (const row of rows) {
+      if (row.metric_name !== 'checks') continue;
+      const timestamp = normalizeTimestamp(row.timestamp);
+      const value = Number(row.metric_value);
+      if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
+      const passed = value > 0.5;
+      points.push({
+        timestamp,
+        label: row.check || row.name || 'checks',
+        elapsed: 0,
+        success: passed,
+        activeUsers: null,
+        latency: null,
+        bytesReceived: null,
+        bytesSent: null,
+        checks: passed ? 1 : 0,
+      });
+    }
+
     if (!points.length && parsed.errors.length) throw new Error(`CSV k6 inválido: ${parsed.errors[0].message}`);
     return points;
   },

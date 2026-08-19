@@ -10,18 +10,72 @@ import {
   Save,
 } from "lucide-react";
 import { parseAndAnalyze, type AnalysisResult } from "@/lib/parsers";
+import { detectParser } from "@/lib/parsers";
+import { STREAMABLE_PARSERS } from "@/lib/parsers/stream";
 import PerformanceDashboard from "@/components/app/PerformanceDashboard";
-async function parseFile(file:File){
-  if(typeof Worker==='undefined')return parseAndAnalyze(await file.text());
-  const worker=new Worker(new URL('../../workers/parser.worker.ts',import.meta.url),{type:'module'});
-  try{
-    const buffer=await file.arrayBuffer();
-    return await new Promise<AnalysisResult>((resolve,reject)=>{
-      worker.onmessage=(event:MessageEvent<{ok:boolean;result?:AnalysisResult;error?:string}>)=>event.data.ok&&event.data.result?resolve(event.data.result):reject(new Error(event.data.error||'Falha no parser.'));
-      worker.onerror=()=>reject(new Error('O Web Worker de análise falhou.'));
-      worker.postMessage({buffer},[buffer]);
+type WorkerResult = { ok: boolean; result?: AnalysisResult; error?: string };
+function makeWorker() {
+  return new Worker(new URL('../../workers/parser.worker.ts', import.meta.url), { type: 'module' });
+}
+function runStreaming(file: File, parserName: string) {
+  const worker = makeWorker();
+  const displayName = parserName === 'jmeter' ? 'Apache JMeter' : parserName;
+  const capabilities = parserName === 'jmeter'
+    ? { requestSamples: true, timeSeries: true, activeUsers: true, responseTime: true, waitingTime: true, networkBytes: true, errors: true }
+    : {};
+  return new Promise<AnalysisResult>((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<WorkerResult>) => {
+      if (!event.data) return;
+      if (event.data.ok && event.data.result) { worker.terminate(); resolve(event.data.result); }
+      else { worker.terminate(); reject(new Error(event.data.error || 'Falha no parser.')); }
+    };
+    worker.onerror = () => { worker.terminate(); reject(new Error('O Web Worker de análise falhou.')); };
+    worker.postMessage({
+      kind: 'start',
+      meta: {
+        name: parserName,
+        displayName,
+        sourceFormat: parserName,
+        capabilities,
+        dataQuality: 'certified',
+      },
     });
-  }finally{worker.terminate();}
+    (async () => {
+      const reader = file.stream().getReader();
+      const decoder = new TextDecoder();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength) worker.postMessage({ kind: 'data', text: decoder.decode(value, { stream: true }) });
+        }
+        worker.postMessage({ kind: 'data', text: decoder.decode() });
+        worker.postMessage({ kind: 'end' });
+      } catch (cause) {
+        worker.terminate();
+        reject(cause instanceof Error ? cause : new Error('Falha ao ler o arquivo.'));
+      }
+    })();
+  });
+}
+async function parseFile(file: File) {
+  if (typeof Worker === 'undefined') return parseAndAnalyze(await file.text());
+  const prefix = await file.slice(0, 16_384).text();
+  const parser = detectParser(prefix);
+  if (parser && STREAMABLE_PARSERS.has(parser.name)) {
+    return runStreaming(file, parser.name);
+  }
+  const worker = makeWorker();
+  try {
+    const buffer = await file.arrayBuffer();
+    return await new Promise<AnalysisResult>((resolve, reject) => {
+      worker.onmessage = (event: MessageEvent<WorkerResult>) => event.data.ok && event.data.result ? resolve(event.data.result) : reject(new Error(event.data.error || 'Falha no parser.'));
+      worker.onerror = () => reject(new Error('O Web Worker de análise falhou.'));
+      worker.postMessage({ kind: 'buffer', buffer }, [buffer]);
+    });
+  } finally {
+    worker.terminate();
+  }
 }
 function uuid() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -49,10 +103,6 @@ export default function AnalysisWorkspace() {
   async function select(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files?.[0];
     if (!selected) return;
-    if (selected.size > 5 * 1024 * 1024) {
-      setError("Arquivo acima de 5 MB. Divida a execução antes de analisar.");
-      return;
-    }
     setFile(selected);
     setLoading(true);
     setError("");
@@ -171,7 +221,7 @@ export default function AnalysisWorkspace() {
             Escolher arquivo de performance
           </span>
           <span className="mt-1 text-sm text-slate-500">
-            JMeter .jtl/.csv · k6 .csv/.json/.ndjson · máximo 5 MB
+            JMeter .jtl/.csv · k6 .csv/.json/.ndjson · arquivos grandes processados em streaming no navegador
           </span>
           <input
             id="performance-file"

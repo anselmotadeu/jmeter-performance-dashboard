@@ -8,12 +8,16 @@ import { newmanParser } from './newman';
 import { gatlingParser } from './gatling';
 import { vegetaParser } from './vegeta';
 import type {
+  AnalysisCapabilities, AnalysisResult, NormalizedPoint, PerformanceParser,
+} from './types';
+import { createAnalysisAccumulator } from './ingest';
+
+export type {
   AggregateReportItem, AnalysisCapabilities, AnalysisResult, ErrorDetail, Heatmap, HeatmapBin,
   HttpPhase, MetricStats, NormalizedPoint, PerformanceParser, TimeSeriesEntry,
 } from './types';
-import { sanitizeLabel, sanitizeMessage } from '@/lib/sanitize';
-
-export type { AggregateReportItem, AnalysisCapabilities, AnalysisResult, ErrorDetail, Heatmap, HttpPhase, MetricStats, NormalizedPoint, PerformanceParser, TimeSeriesEntry };
+export type { AnalysisAccumulator } from './ingest';
+export { HTTP_PHASES, HEATMAP_BINS } from './ingest-constants';
 
 const PARSERS: PerformanceParser[] = [
   jmeterParser,
@@ -26,24 +30,6 @@ const PARSERS: PerformanceParser[] = [
   gatlingParser,
   vegetaParser,
 ];
-
-const DEFAULT_CAPABILITIES: AnalysisCapabilities = {
-  requestSamples: true,
-  timeSeries: true,
-  activeUsers: false,
-  responseTime: true,
-  waitingTime: false,
-  networkBytes: false,
-  checks: false,
-  thresholds: false,
-  errors: true,
-};
-
-const HTTP_ERROR_CODES: Record<string, string> = {
-  '400': 'Bad Request', '401': 'Unauthorized', '403': 'Forbidden', '404': 'Not Found',
-  '429': 'Too Many Requests', '500': 'Internal Server Error', '502': 'Bad Gateway',
-  '503': 'Service Unavailable', '504': 'Gateway Timeout',
-};
 
 export function detectParser(content: string): PerformanceParser | null {
   const sample = content.slice(0, 16_384).replace(/^\uFEFF/, '');
@@ -63,119 +49,6 @@ export function listParsers() {
   }));
 }
 
-function formatDuration(ms: number) {
-  if (ms <= 0 || !Number.isFinite(ms)) return '0s';
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-  if (minutes) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
-}
-
-function percentile(sorted: number[], ratio: number) {
-  if (!sorted.length) return 0;
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
-  return sorted[index];
-}
-
-function median(sorted: number[]) {
-  if (!sorted.length) return 0;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
-type Group = {
-  label: string;
-  count: number;
-  totalElapsed: number;
-  totalLatency: number;
-  latencyCount: number;
-  totalBytes: number;
-  bytesCount: number;
-  totalSentBytes: number;
-  sentBytesCount: number;
-  min: number;
-  max: number;
-  errors: number;
-  responseTimes: number[];
-  latencyTimes: number[];
-  firstTimestamp: number;
-  lastTimestamp: number;
-};
-
-type BucketLabel = {
-  requests: number;
-  errors: number;
-  successes: number;
-  elapsedSum: number;
-  latencySum: number;
-  latencyCount: number;
-  bytes: number;
-  sentBytes: number;
-  activeUsers: number;
-  errorsByMessage: Map<string, number>;
-};
-
-export const HTTP_PHASES: HttpPhase[] = ['duration', 'blocked', 'connecting', 'sending', 'waiting', 'receiving'];
-
-export const HEATMAP_BINS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000];
-
-const PHASE_LABELS: Record<HttpPhase, string> = {
-  duration: 'Tempo de resposta',
-  blocked: 'Bloqueado',
-  connecting: 'Conectando',
-  sending: 'Enviando',
-  waiting: 'Esperando',
-  receiving: 'Recebendo',
-};
-
-const PHASE_BIN_CAP = 512;
-
-function phaseValue(point: NormalizedPoint, phase: HttpPhase): number | null {
-  switch (phase) {
-    case 'duration': return point.elapsed;
-    case 'blocked': return point.blocked ?? null;
-    case 'connecting': return point.connecting ?? null;
-    case 'sending': return point.sending ?? null;
-    case 'waiting': return point.latency ?? null;
-    case 'receiving': return point.receiving ?? null;
-  }
-}
-
-function reservoirPush(values: number[], value: number, cap: number) {
-  if (values.length < cap) {
-    values.push(value);
-    return;
-  }
-  const index = Math.floor(Math.random() * (values.length + 1));
-  if (index < cap) values[index] = value;
-}
-
-function sortUnique(values: number[]) {
-  return values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
-}
-
-type GlobalSecond = {
-  requests: number;
-  errors: number;
-  vus: number;
-  avg: Partial<Record<HttpPhase, { sum: number; n: number }>>;
-  samples: Partial<Record<HttpPhase, number[]>>;
-};
-
-function emptyPhaseAgg() {
-  return { sum: 0, n: 0 };
-}
-
-function binIndex(value: number, bins: number[]) {
-  if (value < bins[0]) return 0;
-  for (let i = 0; i < bins.length; i++) {
-    if (value < bins[i]) return i;
-  }
-  return bins.length;
-}
-
 export function computeAnalysis(
   points: NormalizedPoint[],
   framework: string,
@@ -183,242 +56,9 @@ export function computeAnalysis(
   capabilities: Partial<AnalysisCapabilities> = {},
   dataQuality: 'certified' | 'beta' = 'beta',
 ): AnalysisResult {
-  const resolvedCapabilities = { ...DEFAULT_CAPABILITIES, ...capabilities };
-  if (!points.length) {
-    return {
-      schemaVersion: 2, framework, sourceFormat, dataQuality, capabilities: resolvedCapabilities,
-      diagnostics: ['Nenhuma amostra válida encontrada.'], successCount: 0, errorCount: 0,
-      startTime: '', endTime: '', startTimestamp: null, endTimestamp: null, durationMs: 0,
-      rampUpInfo: { users: 0, usersPerTest: 0, duration: '0s' }, aggregateReport: [],
-      timeSeriesData: [], heatmaps: [], phaseStats: [], errorDetails: [], labels: [], checks: [], thresholds: [],
-    };
-  }
-
-  let minTime = Infinity;
-  let maxTime = -Infinity;
-  let successCount = 0;
-  let errorCount = 0;
-  const groups = new Map<string, Group>();
-  const buckets = new Map<number, Map<string, BucketLabel>>();
-  const errorTotals = new Map<string, number>();
-
-  const globalSeconds = new Map<number, GlobalSecond>();
-  const phaseAllValues: Partial<Record<HttpPhase, number[]>> = {};
-  const heatCounts: Partial<Record<HttpPhase, Map<number, Map<number, number>>>> = {};
-  for (const phase of HTTP_PHASES) {
-    phaseAllValues[phase] = [];
-    heatCounts[phase] = new Map();
-  }
-
-  for (const point of points) {
-    if (!Number.isFinite(point.timestamp) || !Number.isFinite(point.elapsed) || point.elapsed < 0) continue;
-    minTime = Math.min(minTime, point.timestamp);
-    const pointEnd = point.timestamp + point.elapsed;
-    maxTime = Math.max(maxTime, pointEnd);
-    if (point.success) successCount++; else errorCount++;
-
-    const safeLabel = sanitizeLabel(point.label);
-    const safeMessage = point.responseMessage ? sanitizeMessage(point.responseMessage) : undefined;
-    let group = groups.get(safeLabel);
-    if (!group) {
-      group = {
-        label: safeLabel, count: 0, totalElapsed: 0, totalLatency: 0, latencyCount: 0,
-        totalBytes: 0, bytesCount: 0, totalSentBytes: 0, sentBytesCount: 0,
-        min: Infinity, max: -Infinity, errors: 0, responseTimes: [], latencyTimes: [],
-        firstTimestamp: point.timestamp, lastTimestamp: point.timestamp,
-      };
-      groups.set(safeLabel, group);
-    }
-    group.count++;
-    group.totalElapsed += point.elapsed;
-    group.min = Math.min(group.min, point.elapsed);
-    group.max = Math.max(group.max, point.elapsed);
-    group.firstTimestamp = Math.min(group.firstTimestamp, point.timestamp);
-    group.lastTimestamp = Math.max(group.lastTimestamp, pointEnd);
-    group.responseTimes.push(point.elapsed);
-    if (!point.success) group.errors++;
-    if (point.latency !== null) {
-      group.totalLatency += point.latency;
-      group.latencyCount++;
-      group.latencyTimes.push(point.latency);
-    }
-    if (point.bytesReceived !== null) { group.totalBytes += point.bytesReceived; group.bytesCount++; }
-    if (point.bytesSent !== null) { group.totalSentBytes += point.bytesSent; group.sentBytesCount++; }
-
-    const bucketTime = Math.floor(point.timestamp / 1000) * 1000;
-    let bucket = buckets.get(bucketTime);
-    if (!bucket) { bucket = new Map(); buckets.set(bucketTime, bucket); }
-    let labelBucket = bucket.get(safeLabel);
-    if (!labelBucket) {
-      labelBucket = { requests: 0, errors: 0, successes: 0, elapsedSum: 0, latencySum: 0, latencyCount: 0, bytes: 0, sentBytes: 0, activeUsers: 0, errorsByMessage: new Map() };
-      bucket.set(safeLabel, labelBucket);
-    }
-    labelBucket.requests++;
-    labelBucket.elapsedSum += point.elapsed;
-    if (point.success) labelBucket.successes++; else labelBucket.errors++;
-    if (point.latency !== null) { labelBucket.latencySum += point.latency; labelBucket.latencyCount++; }
-    if (point.bytesReceived !== null) labelBucket.bytes += point.bytesReceived;
-    if (point.bytesSent !== null) labelBucket.sentBytes += point.bytesSent;
-    if (point.activeUsers !== null) labelBucket.activeUsers = Math.max(labelBucket.activeUsers, point.activeUsers);
-
-    if (!point.success) {
-      const code = point.responseCode || '000';
-      const message = safeMessage || HTTP_ERROR_CODES[code] || 'Error';
-      const key = `${code}: ${message}`;
-      labelBucket.errorsByMessage.set(key, (labelBucket.errorsByMessage.get(key) ?? 0) + 1);
-      errorTotals.set(key, (errorTotals.get(key) ?? 0) + 1);
-    }
-
-    let globalSecond = globalSeconds.get(bucketTime);
-    if (!globalSecond) {
-      globalSecond = { requests: 0, errors: 0, vus: 0, avg: {}, samples: {} };
-      globalSeconds.set(bucketTime, globalSecond);
-    }
-    globalSecond.requests++;
-    if (!point.success) globalSecond.errors++;
-    if (point.activeUsers !== null)
-      globalSecond.vus = Math.max(globalSecond.vus, point.activeUsers);
-
-    for (const phase of HTTP_PHASES) {
-      const value = phaseValue(point, phase);
-      if (value === null || !Number.isFinite(value) || value < 0) continue;
-      phaseAllValues[phase]!.push(value);
-      const agg = (globalSecond.avg[phase] ??= emptyPhaseAgg());
-      agg.sum += value;
-      agg.n++;
-      if (!globalSecond.samples[phase]) globalSecond.samples[phase] = [];
-      reservoirPush(globalSecond.samples[phase]!, value, PHASE_BIN_CAP);
-      const index = binIndex(value, HEATMAP_BINS);
-      const binCounts = heatCounts[phase]!.get(bucketTime) ?? new Map<number, number>();
-      binCounts.set(index, (binCounts.get(index) ?? 0) + 1);
-      heatCounts[phase]!.set(bucketTime, binCounts);
-    }
-  }
-
-  if (!Number.isFinite(minTime) || !groups.size) return computeAnalysis([], framework, sourceFormat, capabilities, dataQuality);
-  const durationMs = Math.max(0, maxTime - minTime);
-  const labels = Array.from(groups.keys()).sort();
-
-  const aggregateReport: AggregateReportItem[] = Array.from(groups.values()).map((group) => {
-    group.responseTimes.sort((a, b) => a - b);
-    group.latencyTimes.sort((a, b) => a - b);
-    const activeSeconds = Math.max(0.001, (group.lastTimestamp - group.firstTimestamp) / 1000);
-    return {
-      label: group.label,
-      average: Number((group.totalElapsed / group.count).toFixed(2)),
-      median: Number(median(group.responseTimes).toFixed(2)),
-      p90: Number(percentile(group.responseTimes, 0.9).toFixed(2)),
-      p95: Number(percentile(group.responseTimes, 0.95).toFixed(2)),
-      min: Number(group.min.toFixed(2)), max: Number(group.max.toFixed(2)),
-      errorRate: Number(((group.errors / group.count) * 100).toFixed(2)),
-      throughput: Number((group.count / activeSeconds).toFixed(2)),
-      count: group.count,
-      averageLatency: group.latencyCount ? Number((group.totalLatency / group.latencyCount).toFixed(2)) : null,
-      medianLatency: group.latencyCount ? Number(median(group.latencyTimes).toFixed(2)) : null,
-      p90Latency: group.latencyCount ? Number(percentile(group.latencyTimes, 0.9).toFixed(2)) : null,
-      p95Latency: group.latencyCount ? Number(percentile(group.latencyTimes, 0.95).toFixed(2)) : null,
-      bytes: group.bytesCount ? Number((group.totalBytes / group.bytesCount).toFixed(2)) : null,
-      sentBytes: group.sentBytesCount ? Number((group.totalSentBytes / group.sentBytesCount).toFixed(2)) : null,
-    };
-  });
-
-  const timeSeriesData: TimeSeriesEntry[] = Array.from(buckets.entries()).sort(([a], [b]) => a - b).map(([timestamp, bucket]) => {
-    const entry: TimeSeriesEntry = {
-      time: new Date(timestamp).toISOString(), timeStamp: timestamp, totalActiveThreads: 0,
-      totalRequestsPerSecond: 0, totalChecksPerSecond: 0, totalErrorsPerSecond: 0,
-      rps: 0, vus: 0, errs: 0,
-    };
-    const global = globalSeconds.get(timestamp);
-    if (global) {
-      entry.rps = global.requests;
-      entry.vus = global.vus;
-      entry.errs = global.errors;
-      for (const phase of HTTP_PHASES) {
-        const agg = global.avg[phase];
-        if (agg && agg.n) entry[`${phase}Avg`] = Number((agg.sum / agg.n).toFixed(3));
-        const samples = sortUnique(global.samples[phase] ?? []);
-        if (samples.length) {
-          entry[`${phase}Max`] = samples[samples.length - 1];
-          entry[`${phase}P90`] = percentile(samples, 0.9);
-          entry[`${phase}P95`] = percentile(samples, 0.95);
-        }
-      }
-    }
-    for (const label of labels) {
-      const item = bucket.get(label);
-      const requests = item?.requests ?? 0;
-      entry[`requestsPerSecond_${label}`] = requests;
-      entry[`errorsPerSecond_${label}`] = item?.errors ?? 0;
-      entry[`activeThreads_${label}`] = item?.activeUsers ?? 0;
-      entry[`bytes_${label}`] = item?.bytes ?? 0;
-      entry[`sentBytes_${label}`] = item?.sentBytes ?? 0;
-      entry[`elapsed_${label}`] = requests ? (item?.elapsedSum ?? 0) / requests : 0;
-      entry[`latency_${label}`] = item?.latencyCount ? item.latencySum / item.latencyCount : 0;
-      entry[`checksPerSecond_${label}`] = item?.successes ?? 0;
-      entry[`errorDetails_${label}`] = Object.fromEntries(item?.errorsByMessage ?? []);
-      entry.totalActiveThreads = Math.max(entry.totalActiveThreads, item?.activeUsers ?? 0);
-      entry.totalRequestsPerSecond += requests;
-      entry.totalChecksPerSecond += item?.successes ?? 0;
-      entry.totalErrorsPerSecond += item?.errors ?? 0;
-    }
-    return entry;
-  });
-
-  const heatmaps: Heatmap[] = [];
-  for (const phase of HTTP_PHASES) {
-    const values = phaseAllValues[phase]!;
-    const counts = heatCounts[phase]!;
-    if (!values.length || !counts.size) continue;
-    const seconds = Array.from(counts.keys()).sort((a, b) => a - b);
-    const spanMs = Math.max(1000, (seconds[seconds.length - 1] - seconds[0]) + 1000);
-    const numBins = Math.min(24, Math.max(6, Math.round(spanMs / 5000)));
-    const binSize = spanMs / numBins;
-    const series: HeatmapBin[] = Array.from({ length: numBins }, (_, i) => ({
-      t0: seconds[0] + i * binSize,
-      t1: seconds[0] + (i + 1) * binSize,
-      counts: new Array<number>(HEATMAP_BINS.length + 1).fill(0),
-    }));
-    for (const [second, valueBins] of counts.entries()) {
-      const binIndexNow = Math.min(numBins - 1, Math.max(0, Math.floor((second - seconds[0]) / binSize)));
-      const target = series[binIndexNow];
-      for (const [valueBin, count] of valueBins.entries()) target.counts[valueBin] += count;
-    }
-    heatmaps.push({ metric: phase, label: PHASE_LABELS[phase], unit: 'ms', buckets: HEATMAP_BINS, series });
-  }
-
-  const phaseStats: MetricStats[] = HTTP_PHASES.map((phase) => {
-    const sorted = sortUnique(phaseAllValues[phase] ?? []);
-    if (!sorted.length) return { metric: phase, label: PHASE_LABELS[phase], mean: null, median: null, p90: null, p95: null, min: null, max: null, count: 0 };
-    return {
-      metric: phase,
-      label: PHASE_LABELS[phase],
-      mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-      median: median(sorted),
-      p90: percentile(sorted, 0.9),
-      p95: percentile(sorted, 0.95),
-      min: sorted[0],
-      max: sorted[sorted.length - 1],
-      count: sorted.length,
-    };
-  });
-
-  const errorDetails: ErrorDetail[] = Array.from(errorTotals.entries()).map(([key, count]) => {
-    const [code, ...message] = key.split(': ');
-    return { code, message: message.join(': '), count };
-  }).sort((a, b) => b.count - a.count);
-
-  const maxUsers = timeSeriesData.reduce((max, item) => Math.max(max, item.totalActiveThreads), 0);
-  const firstActive = timeSeriesData.find((item) => item.totalActiveThreads > 0)?.timeStamp ?? null;
-  const maxActive = timeSeriesData.find((item) => item.totalActiveThreads === maxUsers)?.timeStamp ?? null;
-
-  return {
-    schemaVersion: 2, framework, sourceFormat, dataQuality, capabilities: resolvedCapabilities,
-    diagnostics: dataQuality === 'beta' ? ['Parser em modo Beta: valide as métricas com a ferramenta de origem.'] : [],
-    successCount, errorCount, startTime: new Date(minTime).toISOString(), endTime: new Date(maxTime).toISOString(),
-    startTimestamp: minTime, endTimestamp: maxTime, durationMs,
-    rampUpInfo: { users: maxUsers, usersPerTest: maxUsers, duration: formatDuration(firstActive !== null && maxActive !== null ? maxActive - firstActive : 0) },
-    aggregateReport, timeSeriesData, heatmaps, phaseStats, errorDetails, labels, checks: [], thresholds: [],
-  };
+  const accumulator = createAnalysisAccumulator(framework, sourceFormat, capabilities, dataQuality);
+  for (const point of points) accumulator.add(point);
+  return accumulator.finalize();
 }
 
 export function parseAndAnalyze(content: string, forcedParser?: string): AnalysisResult {
@@ -429,3 +69,15 @@ export function parseAndAnalyze(content: string, forcedParser?: string): Analysi
   if (!parsed.length) throw new Error(`Nenhuma amostra válida foi encontrada pelo parser ${parser.displayName}.`);
   return computeAnalysis(parsed, parser.displayName, parser.name, parser.capabilities, parser.dataQuality ?? 'beta');
 }
+
+export {
+  jmeterParser,
+  k6JsonParser,
+  k6CsvParser,
+  k6SummaryParser,
+  locustParser,
+  artilleryParser,
+  newmanParser,
+  gatlingParser,
+  vegetaParser,
+};

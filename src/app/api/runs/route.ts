@@ -38,14 +38,11 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   const input = parsed.data;
-  if (
-    input.analysis.timeSeriesData.length * input.analysis.labels.length >
-    5000
-  ) {
+  if (input.analysis.labels.length > 200 || input.analysis.timeSeriesData.length > 3000) {
     return Response.json(
       {
         error:
-          "Série temporal excede o limite do histórico. Reduza a duração ou cardinalidade.",
+          "Série temporal excede o limite do histórico. Reduza a duração ou a quantidade de endpoints.",
       },
       { status: 400 },
     );

@@ -128,6 +128,24 @@ export const k6JsonParser: PerformanceParser = {
         receiving: receiving.get(key)?.[index] ?? null,
       });
     }
+
+    for (const item of items) {
+      if (item.type !== 'Point' || item.metric !== 'checks' || !item.data?.time || !Number.isFinite(item.data.value)) continue;
+      const eventTimestamp = Date.parse(item.data.time);
+      if (!Number.isFinite(eventTimestamp)) continue;
+      const passed = (item.data.value ?? 0) > 0.5;
+      points.push({
+        timestamp: eventTimestamp,
+        label: item.data.tags?.check || item.data.tags?.name || 'checks',
+        elapsed: 0,
+        success: passed,
+        activeUsers: null,
+        latency: null,
+        bytesReceived: null,
+        bytesSent: null,
+        checks: passed ? 1 : 0,
+      });
+    }
     return points;
   },
 };

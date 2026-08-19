@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAndAnalyze } from "@/lib/parsers";
+import { createStreamParser } from "@/lib/parsers/stream";
+import { buildJtlColumns, jtlLineToPoint, splitCsvLine } from "@/lib/parsers/jmeter";
 
 function fixture(name: string) {
   return fs.readFileSync(path.join(process.cwd(), "Tests", name), "utf8");
@@ -80,6 +82,53 @@ describe("certified parsers", () => {
       passes: 980,
       fails: 20,
     });
+  });
+
+  it("streams JMeter JTL with chunked input matching the batch result", () => {
+    const batch = parseAndAnalyze(fixture("jmeter-sample.jtl"));
+    const source = fixture("jmeter-sample.jtl").replace(/^\uFEFF/, "");
+    const handle = createStreamParser({
+      name: "jmeter",
+      displayName: "Apache JMeter",
+      sourceFormat: "jmeter",
+      capabilities: { requestSamples: true, timeSeries: true, activeUsers: true, responseTime: true, waitingTime: true, networkBytes: true, errors: true },
+      dataQuality: "certified",
+    });
+    for (let i = 0; i < source.length; i += 7) {
+      handle.ingest(source.slice(i, i + 7));
+    }
+    const streamed = handle.end();
+    expect(streamed.framework).toBe("Apache JMeter");
+    expect(streamed.successCount).toBe(batch.successCount);
+    expect(streamed.errorCount).toBe(batch.errorCount);
+    expect(streamed.aggregateReport).toEqual(batch.aggregateReport);
+    expect(streamed.durationMs).toBe(1600);
+    expect(streamed.timeSeriesData[0].totalRequestsPerSecond).toBe(
+      batch.timeSeriesData[0].totalRequestsPerSecond,
+    );
+    expect(streamed.labels).toEqual(batch.labels);
+  });
+
+  it("splits CSV respecting quoted commas and quotes", () => {
+    expect(splitCsvLine('a,"b,c",d')).toEqual(["a", "b,c", "d"]);
+    expect(splitCsvLine('"he said ""hi""",2')).toEqual(['he said "hi"', "2"]);
+  });
+
+  it("builds JTL columns and maps a data line to a normalized point", () => {
+    const columns = buildJtlColumns("timeStamp,elapsed,label,responseCode,success,allThreads,Latency,bytes");
+    expect(columns).not.toBeNull();
+    expect(columns?.["label"]).toBe(2);
+    const point = jtlLineToPoint(columns!, "1760000000000,120,Login,200,true,4,95,512");
+    expect(point).toMatchObject({
+      timestamp: 1760000000000,
+      elapsed: 120,
+      label: "Login",
+      success: true,
+      activeUsers: 4,
+      latency: 95,
+      bytesReceived: 512,
+    });
+    expect(buildJtlColumns("foo,bar")).toBeNull();
   });
 
   it("extracts HTTP phases, heatmaps and per-second p95 from K6 NDJSON", () => {
