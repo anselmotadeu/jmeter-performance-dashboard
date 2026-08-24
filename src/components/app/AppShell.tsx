@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  CreditCard,
   FileSearch,
   FolderKanban,
   History,
@@ -17,21 +18,27 @@ import {
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { ThemeContext } from "@/context/ThemeContext";
+import UsageBar from "./UsageBar";
 const nav = [
   { href: "/", label: "Visão geral", icon: BarChart3 },
   { href: "/analisar", label: "Nova análise", icon: FileSearch },
   { href: "/resultados", label: "Histórico", icon: History },
   { href: "/projetos", label: "Projetos", icon: FolderKanban },
   { href: "/configuracoes", label: "Configurações", icon: Settings },
+  { href: "/minha-conta", label: "Minha Conta", icon: CreditCard },
 ];
 export default function AppShell({
   user,
   workspace,
   children,
+  planName,
+  maxMonthlyAnalyses,
 }: {
   user: { name: string; email: string };
   workspace: string;
   children: React.ReactNode;
+  planName?: string;
+  maxMonthlyAnalyses?: number;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -118,6 +125,15 @@ export default function AppShell({
           <div className="truncate text-sm font-black">{user.name}</div>
           <div className="truncate text-xs text-slate-400">{workspace}</div>
         </div>
+        {planName && maxMonthlyAnalyses && (
+          <div className="mb-3">
+            <UsageBar
+              currentUsage={0}
+              maxMonthlyAnalyses={maxMonthlyAnalyses}
+              planName={planName}
+            />
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={toggleTheme}
