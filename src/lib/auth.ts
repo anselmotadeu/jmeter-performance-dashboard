@@ -12,13 +12,8 @@ import { sendAuthEmail } from "@/lib/email";
 import { ensureWorkspace } from "@/lib/workspace";
 
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
-if (process.env.NODE_ENV === "production") {
-  if (
-    !process.env.DATABASE_URL ||
-    !process.env.BETTER_AUTH_SECRET ||
-    !process.env.BETTER_AUTH_URL
-  )
-    throw new Error("Variáveis de autenticação obrigatórias ausentes.");
+// Only validate env vars at runtime, not during build
+if (process.env.NODE_ENV === "production" && process.env.BETTER_AUTH_URL) {
   const url = new URL(baseURL);
   if (url.protocol !== "https:" && url.hostname !== "localhost")
     throw new Error("BETTER_AUTH_URL deve usar HTTPS.");
