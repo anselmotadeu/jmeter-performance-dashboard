@@ -24,8 +24,8 @@ const nav = [
   { href: "/analisar", label: "Nova análise", icon: FileSearch },
   { href: "/resultados", label: "Histórico", icon: History },
   { href: "/projetos", label: "Projetos", icon: FolderKanban },
-  { href: "/configuracoes", label: "Configurações", icon: Settings },
-  { href: "/minha-conta", label: "Minha Conta", icon: CreditCard },
+  { href: "/pricing", label: "Planos", icon: CreditCard },
+  { href: "/minha-conta", label: "Minha Conta", icon: Settings },
 ];
 export default function AppShell({
   user,
@@ -33,18 +33,21 @@ export default function AppShell({
   children,
   planName,
   maxMonthlyAnalyses,
+  isAdmin = false,
 }: {
   user: { name: string; email: string };
   workspace: string;
   children: React.ReactNode;
   planName?: string;
   maxMonthlyAnalyses?: number;
+  isAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, toggleTheme } = useContext(ThemeContext);
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [showLogoutError, setShowLogoutError] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const drawer = useRef<HTMLElement>(null);
@@ -78,7 +81,7 @@ export default function AppShell({
       router.replace("/login");
       router.refresh();
     } catch {
-      alert("Não foi possível sair.");
+      setShowLogoutError(true);
     } finally {
       setSigningOut(false);
     }
