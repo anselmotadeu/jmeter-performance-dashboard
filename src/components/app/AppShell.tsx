@@ -13,6 +13,7 @@ import {
   Menu,
   Moon,
   Settings,
+  Shield,
   Sun,
   X,
 } from "lucide-react";
@@ -33,12 +34,14 @@ export default function AppShell({
   children,
   planName,
   maxMonthlyAnalyses,
+  isSuperAdmin,
 }: {
   user: { name: string; email: string };
   workspace: string;
   children: React.ReactNode;
   planName?: string;
   maxMonthlyAnalyses?: number;
+  isSuperAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -119,6 +122,22 @@ export default function AppShell({
             </Link>
           );
         })}
+        {isSuperAdmin && (
+          <Link
+            href="/admin"
+            aria-current={pathname === "/admin" ? "page" : undefined}
+            onClick={() => setOpen(false)}
+            className={
+              "flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold transition mt-2 " +
+              (pathname === "/admin"
+                ? "bg-indigo-600 text-white"
+                : "text-indigo-300 hover:bg-indigo-600/20 hover:text-indigo-100")
+            }
+          >
+            <Shield className="h-5 w-5" />
+            Super Admin
+          </Link>
+        )}
       </nav>
       <div className="border-t border-white/10 p-4">
         <div className="mb-3 rounded-xl bg-white/5 p-3">

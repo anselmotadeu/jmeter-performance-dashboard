@@ -1,0 +1,31 @@
+/**
+ * POST /api/admin/nfse/resend
+ * Re-emite/reconcilia NFS-e para uma invoice específica (super_admin only)
+ * Governance V6: zero window.alert; autoria obrigatória
+ * @project JMeter Performance Dashboard
+ */
+import { NextRequest, NextResponse } from 'next/server';
+import { headers } from 'next/headers';
+import { auth } from '@/lib/auth';
+import { isAdmin } from '@/lib/admin';
+import { reconcileRecentNFSeEmissions } from '@/lib/nfse';
+
+export async function POST(req: NextRequest) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await isAdmin(session.user.id))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const { stripeInvoiceId } = await req.json() as { stripeInvoiceId: string };
+  if (!stripeInvoiceId) return NextResponse.json({ error: 'stripeInvoiceId é obrigatório' }, { status: 400 });
+
+  // Reconcilia NFS-e pendentes nos últimos 7 dias
+  const result = await reconcileRecentNFSeEmissions();
+  return NextResponse.json({
+    success: result.failed === 0,
+    message: `Reconciliação concluída: ${result.processed} emitidas, ${result.failed} falhas`,
+    checked: result.checked,
+    emitted: result.processed,
+    failed: result.failed,
+    errors: result.errors,
+  });
+}

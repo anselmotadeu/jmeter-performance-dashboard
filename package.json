@@ -12,7 +12,9 @@
     "test:coverage": "jest --coverage",
     "test:ci": "npm run lint && npm run typecheck && npm run test:coverage",
     "audit:ci": "npm audit --omit=dev --audit-level=high",
-    "migrate": "node scripts/migrate.mjs"
+    "migrate": "node scripts/migrate.mjs",
+    "cypress": "cypress run",
+    "cypress:headless": "cypress run --headless --browser electron"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
@@ -45,6 +47,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/xml-crypto": "^1.4.6",
+    "cypress": "^15.21.1",
     "eslint": "^9",
     "eslint-config-next": "^16.3.1",
     "identity-obj-proxy": "^3.0.0",
