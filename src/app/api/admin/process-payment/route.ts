@@ -39,24 +39,34 @@ export async function POST(request: Request) {
     if (!planRow.rows[0]) return Response.json({ error: `Plano '${planSlug}' não encontrado` }, { status: 400 });
     const plan = planRow.rows[0];
 
-    // 3. UPSERT subscription no banco
-    const result = await db.query<{ id: string; status: string }>(
-      `INSERT INTO subscription (
-        user_id, plan_id, status, stripe_customer_id, stripe_subscription_id,
-        current_period_start, current_period_end, cancel_at_period_end, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW(), NOW())
-      ON CONFLICT (user_id) DO UPDATE SET
-        plan_id = EXCLUDED.plan_id,
-        status = EXCLUDED.status,
-        stripe_customer_id = EXCLUDED.stripe_customer_id,
-        stripe_subscription_id = EXCLUDED.stripe_subscription_id,
-        current_period_start = EXCLUDED.current_period_start,
-        current_period_end = EXCLUDED.current_period_end,
-        cancel_at_period_end = false,
-        updated_at = NOW()
-      RETURNING id, status`,
-      [userId, plan.id, sub.status, customerId, stripeSubscriptionId, periodStart, periodEnd]
+    // 3. UPSERT subscription no banco (índice parcial — não suporta ON CONFLICT direto)
+    // Verificar se já existe subscription para este usuário
+    const existing = await db.query<{ id: string }>(
+      'SELECT id FROM subscription WHERE user_id = $1 LIMIT 1', [userId]
     );
+
+    let result;
+    if (existing.rows[0]) {
+      // UPDATE da subscription existente
+      result = await db.query<{ id: string; status: string }>(
+        `UPDATE subscription SET
+          plan_id = $1, status = $2, stripe_customer_id = $3, stripe_subscription_id = $4,
+          current_period_start = $5, current_period_end = $6, cancel_at_period_end = false,
+          updated_at = NOW()
+        WHERE user_id = $7 RETURNING id, status`,
+        [plan.id, sub.status, customerId, stripeSubscriptionId, periodStart, periodEnd, userId]
+      );
+    } else {
+      // INSERT novo
+      result = await db.query<{ id: string; status: string }>(
+        `INSERT INTO subscription (
+          user_id, plan_id, status, stripe_customer_id, stripe_subscription_id,
+          current_period_start, current_period_end, cancel_at_period_end, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW(), NOW())
+        RETURNING id, status`,
+        [userId, plan.id, sub.status, customerId, stripeSubscriptionId, periodStart, periodEnd]
+      );
+    }
 
     // 4. Buscar dados do usuário para o email
     const userRow = await db.query<{ email: string; name: string }>(
