@@ -81,7 +81,9 @@ export default function AppShell({
       router.replace("/login");
       router.refresh();
     } catch {
-      alert("Não foi possível sair.");
+      // Falha silenciosa — redirecionar de qualquer forma
+      console.error('Falha ao encerrar sessão');
+      router.replace("/login");
     } finally {
       setSigningOut(false);
     }
