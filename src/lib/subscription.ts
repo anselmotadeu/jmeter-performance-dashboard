@@ -1,11 +1,11 @@
 /**
  * subscription.ts — Gerenciamento de assinaturas do Performance Dashboard
- * Padrão TestDiff/EstilOS. Trial 7 dias com limites Radar.
+ * Padrão TestDiff/EstilOS. Trial 7 dias com limites Panorama.
  * Banco é SEMPRE reflexo do Stripe — só webhook atualiza.
  */
 
 import { db } from '@/lib/db';
-import { getPlanBySlug, getPlanByStripePrice, RADAR, type Plan } from '@/lib/plans';
+import { getPlanBySlug, getPlanByStripePrice, PANORAMA, type Plan } from '@/lib/plans';
 
 export interface Subscription {
   id: string;
@@ -95,7 +95,7 @@ export async function clearSubscriptionCache(_userId: string) {
 }
 
 /**
- * Cria trial de 7 dias com limites Radar se o usuário não tiver subscription.
+ * Cria trial de 7 dias com limites Panorama se o usuário não tiver subscription.
  * Lição TestDiff: trial bloqueia totalmente ao expirar.
  */
 export async function getOrCreateTrial(userId: string): Promise<Subscription | null> {
@@ -104,7 +104,7 @@ export async function getOrCreateTrial(userId: string): Promise<Subscription | n
 
   try {
     const planResult = await db.query<{ id: string }>(
-      `SELECT id FROM plan WHERE slug = 'radar' LIMIT 1`
+      `SELECT id FROM plan WHERE slug = 'panorama' LIMIT 1`
     );
     if (!planResult.rows[0]) return null;
 
@@ -125,7 +125,7 @@ export async function getOrCreateTrial(userId: string): Promise<Subscription | n
 
 export async function getCurrentPlan(userId: string): Promise<Plan> {
   const sub = await getActiveSubscription(userId);
-  if (!sub) return RADAR; // fallback para trial (limites Radar)
+  if (!sub) return PANORAMA; // fallback para trial (limites Panorama)
   return getPlanBySlug(sub.planSlug);
 }
 

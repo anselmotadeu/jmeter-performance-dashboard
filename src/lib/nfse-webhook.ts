@@ -120,7 +120,7 @@ export async function emitirNFSeForInvoice(invoice: Stripe.Invoice): Promise<voi
 
     // Determinar plano a partir da subscription
     const subId = (invoice as unknown as Record<string, unknown>).subscription as string | null;
-    let planSlug = 'monitor';
+    let planSlug = 'grafico';
     if (subId) {
       const planRow = await db.query<{ slug: string }>(
         `SELECT p.slug FROM subscription s JOIN plan p ON p.id = s.plan_id
@@ -130,7 +130,7 @@ export async function emitirNFSeForInvoice(invoice: Stripe.Invoice): Promise<voi
       if (planRow.rows[0]) planSlug = planRow.rows[0].slug;
     }
 
-    const planoNome = planSlug === 'radar' ? 'Radar' : 'Monitor';
+    const planoNome = planSlug === 'panorama' ? 'Panorama' : 'Gráfico';
     const periodStart = (invoice as unknown as Record<string, number>).period_start
       ? new Date((invoice as unknown as Record<string, number>).period_start * 1000)
       : new Date();

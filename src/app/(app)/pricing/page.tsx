@@ -17,7 +17,7 @@ export default async function PricingPage() {
       <div className="text-center mb-12">
         <h1 className="text-4xl font-bold mb-4">Escolha seu plano</h1>
         <p className="text-lg text-slate-500">
-          7 dias grátis para testar todos os recursos do Radar
+          7 dias grátis para testar todos os recursos do Panorama
         </p>
       </div>
 

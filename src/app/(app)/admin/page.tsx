@@ -64,7 +64,7 @@ export default async function AdminPage() {
           <div className="rounded-xl bg-gradient-to-br from-green-500 to-green-600 p-6 text-white shadow-lg">
             <div className="text-sm font-medium opacity-90">Assinaturas Ativas</div>
             <div className="text-4xl font-bold mt-2">{stats.activeSubscriptions}</div>
-            <div className="text-sm opacity-75 mt-2">Planos Monitor e Radar</div>
+            <div className="text-sm opacity-75 mt-2">Planos Gráfico e Panorama</div>
           </div>
 
           <div className="rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 p-6 text-white shadow-lg">
