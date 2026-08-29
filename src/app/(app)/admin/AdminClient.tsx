@@ -29,7 +29,7 @@ type NFSeRow = {
   status: string;
   nfse_numero: string | null;
   created_at: Date | string;
-  email_sent_at: string | null;
+  email_sent_at: Date | string | null;
   error_message: string | null;
 };
 
