@@ -1,11 +1,14 @@
 /**
- * plans.ts — Planos do Performance Dashboard
- * Monitor: R$79/mês, 50 análises/mês
- * Radar:   R$149/mês, 250 análises/mês
+ * plans.ts — Planos do JMeter Performance Dashboard
+ *
+ * Governance V6 §6.2 (inviolável):
+ *   - Plano Gráfico:  R$ 49/mês | 50 análises/mês
+ *   - Plano Panorama: R$ 149/mês | 250 análises/mês
+ *
  * Padrão EstilOS/TestDiff.
  */
 
-export type PlanSlug = 'monitor' | 'radar';
+export type PlanSlug = 'grafico' | 'panorama';
 
 export interface PlanLimits {
   maxMonthlyAnalyses: number;
@@ -25,12 +28,12 @@ export interface Plan {
   stripePriceId?: string;
 }
 
-export const MONITOR: Plan = {
-  id: 'monitor-plan-id',
-  slug: 'monitor',
-  name: 'Monitor',
-  description: 'Monitoramento essencial de performance',
-  priceCents: 7900,
+export const GRAFICO: Plan = {
+  id: 'grafico-plan-id',
+  slug: 'grafico',
+  name: 'Gráfico',
+  description: 'Visualização essencial de performance — para times que precisam de clareza',
+  priceCents: 4900,
   limits: {
     maxMonthlyAnalyses: 50,
     exportPDF: false,
@@ -38,14 +41,14 @@ export const MONITOR: Plan = {
     comparativeRuns: false,
     advancedCharts: false,
   },
-  stripePriceId: process.env.STRIPE_PRICE_MONITOR_ID,
+  stripePriceId: process.env.STRIPE_PRICE_GRAFICO_ID,
 };
 
-export const RADAR: Plan = {
-  id: 'radar-plan-id',
-  slug: 'radar',
-  name: 'Radar',
-  description: 'Visão completa de performance',
+export const PANORAMA: Plan = {
+  id: 'panorama-plan-id',
+  slug: 'panorama',
+  name: 'Panorama',
+  description: 'Visão completa de performance — análise avançada, comparativo e exportação',
   priceCents: 14900,
   limits: {
     maxMonthlyAnalyses: 250,
@@ -54,18 +57,18 @@ export const RADAR: Plan = {
     comparativeRuns: true,
     advancedCharts: true,
   },
-  stripePriceId: process.env.STRIPE_PRICE_RADAR_ID,
+  stripePriceId: process.env.STRIPE_PRICE_PANORAMA_ID,
 };
 
 export const PLANS: Record<PlanSlug, Plan> = {
-  monitor: MONITOR,
-  radar: RADAR,
+  grafico: GRAFICO,
+  panorama: PANORAMA,
 };
 
-export const PLAN_LIST = [MONITOR, RADAR];
+export const PLAN_LIST = [GRAFICO, PANORAMA];
 
 export function getPlanBySlug(slug: string): Plan {
-  return PLANS[slug as PlanSlug] ?? MONITOR;
+  return PLANS[slug as PlanSlug] ?? GRAFICO;
 }
 
 export function getPlanByStripePrice(priceId: string): Plan | undefined {
