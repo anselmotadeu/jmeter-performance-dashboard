@@ -23,15 +23,13 @@ export async function POST(request: Request) {
 
   try {
     // 1. Buscar dados completos da subscription no Stripe
-    const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId, {
-      expand: ['customer', 'items.data.price'],
-    });
+    const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    const rawSub = sub as unknown as Record<string, unknown>;
 
-    const customer = sub.customer as { id: string; email?: string | null };
-    const customerId = typeof customer === 'string' ? customer : customer.id;
+    const customerId = typeof sub.customer === 'string' ? sub.customer : (sub.customer as { id: string }).id;
     const priceId = sub.items.data[0]?.price?.id;
-    const periodStart = sub.current_period_start ? new Date(sub.current_period_start * 1000) : null;
-    const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+    const periodStart = (rawSub.current_period_start as number) ? new Date((rawSub.current_period_start as number) * 1000) : null;
+    const periodEnd = (rawSub.current_period_end as number) ? new Date((rawSub.current_period_end as number) * 1000) : null;
 
     // 2. Buscar plano pelo slug
     const planRow = await db.query<{ id: string; name: string; slug: string; price_cents: number }>(
@@ -79,7 +77,6 @@ export async function POST(request: Request) {
         to: user.email,
         userName: user.name,
         planName: plan.name,
-        planSlug: plan.slug as 'grafico' | 'panorama',
         priceBRL,
         renewalDate,
         appUrl: APP_URL,
