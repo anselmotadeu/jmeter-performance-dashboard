@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth';
 import { stripe } from '@/lib/stripe';
 import { PLANS, type PlanSlug } from '@/lib/plans';
-import { getActiveSubscription } from '@/lib/subscription';
+import { getActiveSubscription, getStripeCustomerId } from '@/lib/subscription';
 
 const APP_URL = process.env.BETTER_AUTH_URL ?? 'https://jmeter-performance-dashboard.vercel.app';
 
@@ -37,11 +37,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const checkout = await stripe.checkout.sessions.create({
+    // Buscar Stripe Customer ID existente (se o usuário já fez checkout antes)
+    const existingCustomerId = await getStripeCustomerId(session.user.id);
+
+    // Parâmetros base do checkout
+    const checkoutParams: Parameters<typeof stripe.checkout.sessions.create>[0] = {
       mode: 'subscription',
       payment_method_types: ['card'],
       billing_address_collection: 'required',
-      customer_update: { address: 'auto', name: 'auto' },
       // Pedir CPF/CNPJ para NFS-e (padrão EstilOS)
       custom_fields: [{
         key: 'cpf_cnpj',
@@ -54,8 +57,18 @@ export async function POST(request: Request) {
       success_url: `${APP_URL}/minha-conta?checkout=success`,
       cancel_url: `${APP_URL}/pricing`,
       locale: 'pt-BR',
-    });
+    };
 
+    // customer_update só é válido quando existe um customer — evita o erro do Stripe
+    if (existingCustomerId) {
+      checkoutParams.customer = existingCustomerId;
+      checkoutParams.customer_update = { address: 'auto', name: 'auto' };
+    } else {
+      // Pré-preencher email para facilitar o checkout
+      checkoutParams.customer_email = session.user.email;
+    }
+
+    const checkout = await stripe.checkout.sessions.create(checkoutParams);
     return Response.json({ url: checkout.url });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
