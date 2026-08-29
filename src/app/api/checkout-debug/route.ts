@@ -43,7 +43,7 @@ export async function GET(request: Request) {
         type: 'text',
         optional: false,
       }],
-      line_items: [{ price: PLANS.grafico?.stripePriceId!, quantity: 1 }],
+      line_items: [{ price: PLANS.grafico?.stripePriceId ?? '', quantity: 1 }],
       metadata: { userId: 'debug-test', planSlug: 'grafico' },
       success_url: `${APP_URL}/minha-conta?checkout=success`,
       cancel_url: `${APP_URL}/pricing`,
