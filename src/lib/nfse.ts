@@ -437,14 +437,15 @@ export async function listRecentNFSeEmissions() {
  * Padrão EstilOS (server/billing.ts → reconcileRecentPaidInvoices).
  */
 export async function reconcileRecentNFSeEmissions(): Promise<{
-  checked: number; processed: number; failed: number; errors: Array<{ invoiceId: string; error: string }>;
+  checked: number; processed: number; skipped: number; failed: number; errors: Array<{ invoiceId: string; error: string }>;
 }> {
   const { stripe } = await import('@/lib/stripe');
-  const { emitirNFSeForInvoice, emitirNFSeForUpgradeSession } = await import('@/lib/nfse-webhook');
+  const { emitirNFSeForInvoice, emitirNFSeForUpgradeSession, getUserByCustomer } = await import('@/lib/nfse-webhook');
 
   const since = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
   let processed = 0;
+  let skipped = 0;
   let failed = 0;
   const errors: Array<{ invoiceId: string; error: string }> = [];
 
@@ -457,6 +458,12 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
   for (const invoice of invoices.data) {
     const raw = invoice as unknown as Record<string, number>;
     if ((raw.amount_paid ?? 0) <= 0) continue;
+    const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+    // Invoices de customers sem usuário vinculado (testes/ruído no Stripe) não são nossas.
+    if (customerId && !(await getUserByCustomer(customerId))) {
+      skipped++;
+      continue;
+    }
     try {
       const before = await getNFSeEmission(invoice.id);
       if (before?.status === 'canceled') continue;
@@ -481,6 +488,11 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
     const meta = (session.metadata ?? {}) as Record<string, string>;
     if (meta.type !== 'upgrade' || session.payment_status !== 'paid') continue;
     const sourceId = `checkout_${session.id}`;
+    const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    if (customerId && !(await getUserByCustomer(customerId))) {
+      skipped++;
+      continue;
+    }
     try {
       const before = await getNFSeEmission(sourceId);
       if (before?.status === 'canceled') continue;
@@ -493,7 +505,7 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
     }
   }
 
-  return { checked: invoices.data.length + sessions.data.length, processed, failed, errors };
+  return { checked: invoices.data.length + sessions.data.length, processed, skipped, failed, errors };
 }
 
 export async function reconcileNFSePayment(stripeInvoiceId: string): Promise<{ emitted: boolean; message: string }> {

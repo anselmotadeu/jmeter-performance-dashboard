@@ -22,9 +22,10 @@ export async function POST(req: NextRequest) {
     const result = await reconcileRecentNFSeEmissions();
     return NextResponse.json({
       success: result.failed === 0,
-      message: `Reconciliação concluída: ${result.processed} emitidas, ${result.failed} falhas`,
+      message: `Reconciliação concluída: ${result.processed} emitidas, ${result.skipped} ignoradas, ${result.failed} falhas`,
       checked: result.checked,
       emitted: result.processed,
+      skipped: result.skipped,
       failed: result.failed,
       errors: result.errors,
     });

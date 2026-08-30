@@ -48,7 +48,7 @@ function checkoutTaxId(session: Stripe.Checkout.Session): string | null {
 }
 
 /** Busca userId + email + nome pelo stripe_customer_id */
-async function getUserByCustomer(customerId: string): Promise<{ userId: string; email: string; name: string } | null> {
+export async function getUserByCustomer(customerId: string): Promise<{ userId: string; email: string; name: string } | null> {
   const r = await db.query<{ user_id: string; user_email: string | null }>(
     `SELECT s.user_id, u.email as user_email
      FROM subscription s
