@@ -106,26 +106,29 @@ function emailLayout(body: string, previewText = '') {
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
   <title>Performance Dashboard</title>
   <style>
+    :root { color-scheme: light dark; }
     @media (prefers-color-scheme: dark) {
-      body, .em-outer  { background-color: #060b14 !important; }
-      .em-card         { background-color: #0d1526 !important; border-color: #1e2d45 !important; }
-      .em-inner        { background-color: #111c30 !important; border-color: #1e2d45 !important; }
-      .em-footer       { background-color: #080f1e !important; border-color: #1e2d45 !important; }
-      .em-footer-text  { color: #64748b !important; }
-      .em-divider-td   { border-top-color: #1e2d45 !important; }
-      .em-h1           { color: #f8fafc !important; }
-      .em-h2           { color: #f1f5f9 !important; }
-      .em-overline     { color: #64748b !important; }
-      .em-body         { color: #94a3b8 !important; }
-      .em-strong       { color: #f1f5f9 !important; }
-      .em-muted        { color: #475569 !important; }
-      .em-meta-key     { color: #475569 !important; }
-      .em-meta-val     { color: #e2e8f0 !important; }
-      .em-meta-sep     { border-top-color: #1e2d45 !important; }
-      .em-box-title    { color: #cbd5e1 !important; }
-      .em-box-text     { color: #64748b !important; }
+      body, .em-outer         { background-color: #060b14 !important; }
+      .em-card                { background-color: #0d1526 !important; border-color: #1e2d45 !important; }
+      .em-inner               { background-color: #111c30 !important; border-color: #1e2d45 !important; }
+      .em-footer              { background-color: #080f1e !important; border-color: #1e2d45 !important; }
+      .em-footer-text         { color: #64748b !important; }
+      .em-divider-td,
+      .em-meta-sep            { border-top-color: #1e2d45 !important; }
+      .em-h1                  { color: #f8fafc !important; }
+      .em-h2                  { color: #e2e8f0 !important; }
+      .em-overline            { color: #94a3b8 !important; }
+      .em-body                { color: #cbd5e1 !important; }
+      .em-strong              { color: #f1f5f9 !important; }
+      .em-muted               { color: #64748b !important; }
+      .em-meta-key            { color: #64748b !important; }
+      .em-meta-val            { color: #e2e8f0 !important; }
+      .em-box-title           { color: #e2e8f0 !important; }
+      .em-box-text            { color: #94a3b8 !important; }
     }
   </style>
   ${previewText ? `<span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${previewText}&nbsp;&zwnj;&nbsp;&zwnj;</span>` : ''}
@@ -171,10 +174,10 @@ function emailLayout(body: string, previewText = '') {
           <!-- FOOTER -->
           <tr>
             <td class="em-footer" style="background:#f1f5f9;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:24px 40px;text-align:center;">
-              <p class="em-footer-text" style="margin:0 0 4px;color:#94a3b8;font-size:12px;line-height:1.7;">
+              <p class="em-footer-text" style="margin:0 0 4px;color:#64748b;font-size:12px;line-height:1.7;">
                 Você está recebendo este email por ter uma conta no Performance Dashboard.
               </p>
-              <p class="em-footer-text" style="margin:0;color:#94a3b8;font-size:12px;line-height:1.7;">
+              <p class="em-footer-text" style="margin:0;color:#64748b;font-size:12px;line-height:1.7;">
                 Dúvidas? Acesse <a href="${APP_URL}" style="color:#64748b;">jmeter-performance-dashboard.vercel.app</a> ou responda este email.
               </p>
             </td>
@@ -239,16 +242,16 @@ export async function sendSubscriptionConfirmationEmail(opts: {
   const featureItems = plan.features.map(f =>
     `<tr>
       <td style="vertical-align:top;padding-right:10px;font-size:15px;">✅</td>
-      <td style="padding:0 0 8px;"><p class="em-box-text" style="margin:0;color:#64748b;font-size:14px;line-height:1.5;">${f}</p></td>
+      <td style="padding:0 0 8px;"><p class="em-box-text" style="margin:0;color:#475569;font-size:14px;line-height:1.5;">${f}</p></td>
     </tr>`
   ).join('');
 
   const body = `
-    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Assinatura confirmada</p>
+    <p class="em-overline" style="margin:0 0 4px;color:#475569;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Assinatura confirmada</p>
     <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;letter-spacing:-0.5px;">
       Parabéns, ${firstName}! 🎉
     </h1>
-    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
+    <p class="em-body" style="margin:0 0 28px;color:#334155;font-size:15px;line-height:1.8;">
       Seu plano <strong style="color:${plan.color};">${opts.planName}</strong> foi ativado com sucesso. Você já tem acesso completo a todas as funcionalidades.
     </p>
 
@@ -258,25 +261,25 @@ export async function sendSubscriptionConfirmationEmail(opts: {
         <td style="padding:16px 24px;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
-              <td class="em-meta-key" style="padding:8px 0;color:#94a3b8;font-size:13px;width:120px;">Plano</td>
-              <td class="em-meta-val" style="padding:8px 0 8px 12px;color:#1e293b;font-size:14px;font-weight:700;">${opts.planName}</td>
+              <td class="em-meta-key" style="padding:8px 0;color:#64748b;font-size:13px;width:120px;">Plano</td>
+              <td class="em-meta-val" style="padding:8px 0 8px 12px;color:#0f172a;font-size:14px;font-weight:700;">${opts.planName}</td>
             </tr>
             <tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
             <tr>
-              <td class="em-meta-key" style="padding:8px 0;color:#94a3b8;font-size:13px;">Valor mensal</td>
-              <td class="em-meta-val" style="padding:8px 0 8px 12px;color:#1e293b;font-size:14px;font-weight:700;">${opts.priceBRL}/mês</td>
+              <td class="em-meta-key" style="padding:8px 0;color:#64748b;font-size:13px;">Valor mensal</td>
+              <td class="em-meta-val" style="padding:8px 0 8px 12px;color:#0f172a;font-size:14px;font-weight:700;">${opts.priceBRL}/mês</td>
             </tr>
             <tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
             <tr>
-              <td class="em-meta-key" style="padding:8px 0;color:#94a3b8;font-size:13px;">Próxima renovação</td>
-              <td class="em-meta-val" style="padding:8px 0 8px 12px;color:#1e293b;font-size:14px;">${opts.renewalDate}</td>
+              <td class="em-meta-key" style="padding:8px 0;color:#64748b;font-size:13px;">Próxima renovação</td>
+              <td class="em-meta-val" style="padding:8px 0 8px 12px;color:#0f172a;font-size:14px;">${opts.renewalDate}</td>
             </tr>
           </table>
         </td>
       </tr>
     </table>
 
-    <p class="em-overline" style="margin:0 0 8px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Incluído no seu plano</p>
+    <p class="em-overline" style="margin:0 0 8px;color:#475569;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Incluído no seu plano</p>
     <table width="100%" cellpadding="0" cellspacing="0" border="0" class="em-inner"
       style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:32px;">
       <tr><td style="padding:20px 24px;">
@@ -297,8 +300,8 @@ export async function sendSubscriptionConfirmationEmail(opts: {
           <tr>
             <td style="vertical-align:top;padding-right:14px;font-size:20px;">💬</td>
             <td>
-              <p class="em-box-title" style="margin:0 0 4px;color:#1e293b;font-size:14px;font-weight:700;">Precisa de ajuda?</p>
-              <p class="em-box-text" style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">
+              <p class="em-box-title" style="margin:0 0 4px;color:#0f172a;font-size:14px;font-weight:700;">Precisa de ajuda?</p>
+              <p class="em-box-text" style="margin:0;color:#475569;font-size:13px;line-height:1.6;">
                 Acesse <strong style="color:#475569;">Minha Conta</strong> para gerenciar sua assinatura ou responda este email.
                 Respondemos em até <strong style="color:#475569;">48 horas úteis</strong>.
               </p>
@@ -325,12 +328,12 @@ export async function sendCancellationEmail(opts: {
   const firstName = opts.userName.split(' ')[0] || 'Cliente';
 
   const body = `
-    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Assinatura cancelada</p>
+    <p class="em-overline" style="margin:0 0 4px;color:#475569;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Assinatura cancelada</p>
     <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;">
       Sentimos sua falta, ${firstName} 😔
     </h1>
-    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
-      Sua assinatura do plano <strong class="em-strong" style="color:#1e293b;">${opts.planName}</strong> foi cancelada.
+    <p class="em-body" style="margin:0 0 28px;color:#334155;font-size:15px;line-height:1.8;">
+      Sua assinatura do plano <strong class="em-strong" style="color:#0f172a;">${opts.planName}</strong> foi cancelada.
       Você continua com acesso completo até o final do período pago.
     </p>
 
@@ -346,7 +349,7 @@ export async function sendCancellationEmail(opts: {
       <tr><td>${ctaButton('Reativar minha assinatura →', opts.appUrl + '/pricing', '#1d4ed8')}</td></tr>
     </table>
 
-    <p class="em-muted" style="margin:0;color:#94a3b8;font-size:13px;text-align:center;">
+    <p class="em-muted" style="margin:0;color:#64748b;font-size:13px;text-align:center;">
       Se mudar de ideia, basta reativar em /pricing antes de ${opts.accessUntil}.
     </p>
   `;
@@ -377,36 +380,36 @@ export async function sendNFSeEmail(opts: {
   const codeRow = opts.codigoVerificacao
     ? `<tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
        <tr>
-         <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Código de verificação</td>
-         <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:14px;font-family:monospace;font-weight:700;">${opts.codigoVerificacao}</td>
+         <td class="em-meta-key" style="padding:10px 0;color:#64748b;font-size:13px;">Código de verificação</td>
+         <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#0f172a;font-size:14px;font-family:monospace;font-weight:700;">${opts.codigoVerificacao}</td>
        </tr>`
     : '';
 
   const body = `
-    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Nota fiscal de serviço</p>
+    <p class="em-overline" style="margin:0 0 4px;color:#475569;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Nota fiscal de serviço</p>
     <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;">Sua NFS-e foi emitida</h1>
-    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
-      Olá, ${firstName}. A nota fiscal referente ao pagamento do plano <strong class="em-strong" style="color:#1e293b;">${opts.planName}</strong>
-      de <strong class="em-strong" style="color:#1e293b;">${opts.mesReferencia}</strong> está disponível para consulta.
+    <p class="em-body" style="margin:0 0 28px;color:#334155;font-size:15px;line-height:1.8;">
+      Olá, ${firstName}. A nota fiscal referente ao pagamento do plano <strong class="em-strong" style="color:#0f172a;">${opts.planName}</strong>
+      de <strong class="em-strong" style="color:#0f172a;">${opts.mesReferencia}</strong> está disponível para consulta.
     </p>
 
     <table width="100%" cellpadding="0" cellspacing="0" border="0" class="em-inner"
       style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:28px;">
       <tr><td style="padding:16px 24px;"><table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Número da NFS-e</td>
-          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:14px;font-family:monospace;font-weight:700;">${opts.nfseNumero}</td>
+          <td class="em-meta-key" style="padding:10px 0;color:#64748b;font-size:13px;">Número da NFS-e</td>
+          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#0f172a;font-size:14px;font-family:monospace;font-weight:700;">${opts.nfseNumero}</td>
         </tr>
         ${codeRow}
         <tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
         <tr>
-          <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Valor</td>
-          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:14px;font-weight:700;">${valor}</td>
+          <td class="em-meta-key" style="padding:10px 0;color:#64748b;font-size:13px;">Valor</td>
+          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#0f172a;font-size:14px;font-weight:700;">${valor}</td>
         </tr>
         <tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
         <tr>
-          <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Prestador</td>
-          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:13px;">ANSTECH QUALITY ASSURANCE LTDA<br/>CNPJ: 48.847.227/0001-01</td>
+          <td class="em-meta-key" style="padding:10px 0;color:#64748b;font-size:13px;">Prestador</td>
+          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#0f172a;font-size:13px;">ANSTECH QUALITY ASSURANCE LTDA<br/>CNPJ: 48.847.227/0001-01</td>
         </tr>
       </table></td></tr>
     </table>
@@ -415,7 +418,7 @@ export async function sendNFSeEmail(opts: {
       <tr><td align="center">${ctaButton('Consultar NFS-e na Prefeitura →', opts.verificacaoUrl)}</td></tr>
     </table>
 
-    <p class="em-muted" style="margin:0;color:#94a3b8;font-size:12px;line-height:1.7;">
+    <p class="em-muted" style="margin:0;color:#64748b;font-size:12px;line-height:1.7;">
       Na página da Prefeitura de São Paulo, informe o CNPJ da ANSTECH <strong>48.847.227/0001-01</strong>,
       o número da nota e o código de verificação apresentados acima.
     </p>
@@ -436,10 +439,10 @@ export async function sendTrialExpiringEmail(opts: {
   const firstName = opts.userName.split(' ')[0] || 'Cliente';
 
   const body = `
-    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Trial expirando em ${opts.daysLeft} dia${opts.daysLeft > 1 ? 's' : ''}</p>
+    <p class="em-overline" style="margin:0 0 4px;color:#475569;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Trial expirando em ${opts.daysLeft} dia${opts.daysLeft > 1 ? 's' : ''}</p>
     <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;">Olá, ${firstName}! 👋</h1>
-    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
-      Seu período de teste gratuito termina em <strong class="em-strong" style="color:#1e293b;">${opts.daysLeft} dia${opts.daysLeft > 1 ? 's' : ''}</strong>. Para continuar acessando todos os recursos do Performance Dashboard, escolha um plano que se encaixe nas suas necessidades.
+    <p class="em-body" style="margin:0 0 28px;color:#334155;font-size:15px;line-height:1.8;">
+      Seu período de teste gratuito termina em <strong class="em-strong" style="color:#0f172a;">${opts.daysLeft} dia${opts.daysLeft > 1 ? 's' : ''}</strong>. Para continuar acessando todos os recursos do Performance Dashboard, escolha um plano que se encaixe nas suas necessidades.
     </p>
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
       style="background:#fef3c7;border:1px solid #fbbf24;border-left:4px solid #f59e0b;border-radius:0 12px 12px 0;margin-bottom:28px;">
@@ -450,7 +453,7 @@ export async function sendTrialExpiringEmail(opts: {
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
       <tr><td>${ctaButton('Ver planos disponíveis →', opts.appUrl + '/pricing', '#f59e0b')}</td></tr>
     </table>
-    <p class="em-muted" style="margin:0;color:#94a3b8;font-size:13px;text-align:center;">
+    <p class="em-muted" style="margin:0;color:#64748b;font-size:13px;text-align:center;">
       Seu acesso atual continua até o fim do período de teste.
     </p>
   `;
@@ -470,10 +473,10 @@ export async function sendTrialExpiredEmail(opts: {
   const firstName = opts.userName.split(' ')[0] || 'Cliente';
 
   const body = `
-    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Trial expirado</p>
+    <p class="em-overline" style="margin:0 0 4px;color:#475569;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Trial expirado</p>
     <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;">Olá, ${firstName}</h1>
-    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
-      Seu período de teste gratuito <strong class="em-strong" style="color:#1e293b;">expirou</strong>. Para continuar usando o Performance Dashboard com todos os recursos, escolha um plano agora.
+    <p class="em-body" style="margin:0 0 28px;color:#334155;font-size:15px;line-height:1.8;">
+      Seu período de teste gratuito <strong class="em-strong" style="color:#0f172a;">expirou</strong>. Para continuar usando o Performance Dashboard com todos os recursos, escolha um plano agora.
     </p>
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
       style="background:#fee2e2;border:1px solid #fecaca;border-left:4px solid #ef4444;border-radius:0 12px 12px 0;margin-bottom:28px;">
@@ -484,7 +487,7 @@ export async function sendTrialExpiredEmail(opts: {
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
       <tr><td>${ctaButton('Assinar agora →', opts.appUrl + '/pricing', '#ef4444')}</td></tr>
     </table>
-    <p class="em-muted" style="margin:0;color:#94a3b8;font-size:13px;text-align:center;">
+    <p class="em-muted" style="margin:0;color:#64748b;font-size:13px;text-align:center;">
       Assine um plano para recuperar o acesso imediatamente.
     </p>
   `;
@@ -504,10 +507,10 @@ export async function sendPaymentFailedEmail(opts: {
   const firstName = opts.userName.split(' ')[0] || 'Cliente';
 
   const body = `
-    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Falha no pagamento</p>
+    <p class="em-overline" style="margin:0 0 4px;color:#475569;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Falha no pagamento</p>
     <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;">Olá, ${firstName} 😟</h1>
-    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
-      Não conseguimos processar o pagamento da sua assinatura do plano <strong class="em-strong" style="color:#1e293b;">${opts.planName}</strong>. Seu acesso continua ativo pelos próximos dias, mas atualize suas informações de pagamento para evitar interrupção.
+    <p class="em-body" style="margin:0 0 28px;color:#334155;font-size:15px;line-height:1.8;">
+      Não conseguimos processar o pagamento da sua assinatura do plano <strong class="em-strong" style="color:#0f172a;">${opts.planName}</strong>. Seu acesso continua ativo pelos próximos dias, mas atualize suas informações de pagamento para evitar interrupção.
     </p>
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
       style="background:#fee2e2;border:1px solid #fecaca;border-left:4px solid #ef4444;border-radius:0 12px 12px 0;margin-bottom:28px;">
@@ -518,7 +521,7 @@ export async function sendPaymentFailedEmail(opts: {
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
       <tr><td align="center">${ctaButton('Atualizar pagamento →', opts.appUrl + '/minha-conta', '#ef4444')}</td></tr>
     </table>
-    <p class="em-muted" style="margin:0;color:#94a3b8;font-size:13px;text-align:center;">
+    <p class="em-muted" style="margin:0;color:#64748b;font-size:13px;text-align:center;">
       Se você já atualizou, ignore este email.
     </p>
   `;
