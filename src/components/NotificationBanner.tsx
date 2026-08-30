@@ -1,22 +1,45 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, AlertCircle, Info, CheckCircle } from 'lucide-react';
+import { X, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
 
 interface Notification {
   id: number;
   title: string;
   body: string;
   type: 'info' | 'warning' | 'success';
+  expires_at: string | null;
   created_at: string;
 }
 
+/**
+ * NotificationBanner — notificações da plataforma para o usuário.
+ * Padrão TestDiff/EstilOS: info=azul, warning=âmbar, success=verde.
+ * Mensagem exibida por completo (sem truncar); expiradas são filtradas no servidor.
+ * Dismiss persiste via /api/notifications.
+ */
 export function NotificationBanner() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
 
+  async function fetchNotifications() {
+    // Re-checa a cada minuto para remover notificações que acabaram de expirar
+    try {
+      const res = await fetch('/api/notifications');
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+      }
+    } catch { /* mantém o estado atual */ }
+  }
+
   useEffect(() => {
-    async function fetchNotifications() {
+    const id = window.setInterval(fetchNotifications, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    async function initial() {
       try {
         const res = await fetch('/api/notifications');
         if (res.ok) {
@@ -27,7 +50,7 @@ export function NotificationBanner() {
         console.error('Failed to fetch notifications:', err);
       }
     }
-    fetchNotifications();
+    initial();
   }, []);
 
   async function dismissNotification(id: number) {
@@ -43,68 +66,64 @@ export function NotificationBanner() {
     }
   }
 
+  const TYPE_STYLE: Record<Notification['type'], { box: string; icon: React.ReactNode; title: string; meta: string }> = {
+    warning: {
+      box: 'border-amber-500/30 bg-amber-500/10',
+      icon: <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />,
+      title: 'text-amber-800 dark:text-amber-200',
+      meta: 'text-amber-600 dark:text-amber-300/80',
+    },
+    success: {
+      box: 'border-emerald-500/30 bg-emerald-500/10',
+      icon: <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />,
+      title: 'text-emerald-800 dark:text-emerald-200',
+      meta: 'text-emerald-600 dark:text-emerald-300/80',
+    },
+    info: {
+      box: 'border-blue-500/30 bg-blue-500/10',
+      icon: <Info className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />,
+      title: 'text-blue-800 dark:text-blue-200',
+      meta: 'text-blue-600 dark:text-blue-300/80',
+    },
+  };
+
   const visibleNotifications = notifications.filter(n => !dismissedIds.has(n.id));
 
   if (visibleNotifications.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-md">
-      {visibleNotifications.map(notification => (
-        <div
-          key={notification.id}
-          className={`rounded-lg border p-4 shadow-lg animate-in slide-in-from-right ${
-            notification.type === 'warning'
-              ? 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950/20 dark:border-yellow-900'
-              : notification.type === 'success'
-              ? 'bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-900'
-              : 'bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-900'
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            {notification.type === 'warning' && (
-              <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-            )}
-            {notification.type === 'success' && (
-              <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-            )}
-            {notification.type === 'info' && (
-              <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-            )}
-            <div className="flex-1 min-w-0">
-              <h3 className={`font-semibold text-sm ${
-                notification.type === 'warning'
-                  ? 'text-yellow-900 dark:text-yellow-100'
-                  : notification.type === 'success'
-                  ? 'text-green-900 dark:text-green-100'
-                  : 'text-blue-900 dark:text-blue-100'
-              }`}>
-                {notification.title}
-              </h3>
-              <p className={`text-sm mt-1 ${
-                notification.type === 'warning'
-                  ? 'text-yellow-800 dark:text-yellow-200'
-                  : notification.type === 'success'
-                  ? 'text-green-800 dark:text-green-200'
-                  : 'text-blue-800 dark:text-blue-200'
-              }`}>
-                {notification.body}
-              </p>
+    <div className="fixed top-4 right-4 z-50 space-y-2 w-[min(26rem,calc(100vw-2rem))]">
+      {visibleNotifications.slice(0, 5).map(notification => {
+        const style = TYPE_STYLE[notification.type] ?? TYPE_STYLE.info;
+        return (
+          <div
+            key={notification.id}
+            className={`rounded-xl border px-4 py-3 shadow-lg backdrop-blur-sm ${style.box}`}
+          >
+            <div className="flex items-start gap-3">
+              {style.icon}
+              <div className="flex-1 min-w-0">
+                <h3 className={`font-bold text-sm leading-snug ${style.title}`}>{notification.title}</h3>
+                <p className={`text-sm mt-0.5 leading-snug break-words whitespace-normal ${style.title}`}>
+                  {notification.body}
+                </p>
+                {notification.expires_at && (
+                  <p className={`text-[10px] mt-1.5 font-semibold ${style.meta}`}>
+                    Expira em {new Date(notification.expires_at).toLocaleDateString('pt-BR')}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => dismissNotification(notification.id)}
+                aria-label="Dispensar notificação"
+                className="shrink-0 rounded-md p-1 opacity-60 hover:opacity-100 transition-opacity text-current"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <button
-              onClick={() => dismissNotification(notification.id)}
-              className={`flex-shrink-0 rounded-md p-1 transition-colors ${
-                notification.type === 'warning'
-                  ? 'hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
-                  : notification.type === 'success'
-                  ? 'hover:bg-green-100 dark:hover:bg-green-900/30'
-                  : 'hover:bg-blue-100 dark:hover:bg-blue-900/30'
-              }`}
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

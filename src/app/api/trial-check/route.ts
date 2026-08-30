@@ -6,11 +6,11 @@ export const dynamic = 'force-dynamic';
 const APP_URL = process.env.BETTER_AUTH_URL ?? 'https://jmeter-performance-dashboard.vercel.app';
 
 /**
- * POST /api/trial-check
+ * GET/POST /api/trial-check
  * Verifica trials expirando (2 dias) e expirados, envia emails.
- * Chamado pelo middleware ou cron job.
+ * Chamado pelo cron da Vercel (GET) ou manualmente via POST.
  */
-export async function POST(request: Request) {
+async function handler(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
     return Response.json({ error: 'Não autorizado.' }, { status: 401 });
@@ -133,3 +133,6 @@ export async function POST(request: Request) {
     expiredSent,
   });
 }
+
+export const GET = handler;
+export const POST = handler;

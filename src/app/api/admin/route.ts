@@ -147,9 +147,11 @@ async function getUsers(params: URLSearchParams) {
   const status = params.get('status') ?? '';
   const plan = params.get('plan') ?? '';
 
-  const conditions: string[] = [`u.role != $1`];
-  const values: unknown[] = [SUPER_ADMIN_ROLE];
-  let idx = 2;
+  // Sem filtro por role: inclui o próprio super_admin (conta de testes/produção).
+  // O status na tabela indica "Sem plano" quando não há subscription.
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
 
   if (search) {
     conditions.push(`(u.name ILIKE $${idx} OR u.email ILIKE $${idx + 1})`);
@@ -170,7 +172,7 @@ async function getUsers(params: URLSearchParams) {
 
   return await db.query(`
     SELECT
-      u.id, u.name, u.email, u."createdAt" as created_at,
+      u.id, u.name, u.email, u.role, u."createdAt" as created_at,
       sub.status as sub_status, sub.stripe_customer_id,
       sub.stripe_subscription_id, sub.current_period_end,
       sub.cancel_at, sub.canceled_at, sub.cancel_at_period_end,
@@ -301,11 +303,12 @@ async function sendNotification(body: Record<string, unknown>) {
     title: string; bodyText: string; type: string; expiresAt?: string;
   };
   if (!title || !bodyText) throw new HttpError('Título e mensagem obrigatórios.');
+  if (!expiresAt) throw new HttpError('Data de vencimento obrigatória.');
   await db.query(
     `INSERT INTO notification (user_id, target_plan, target_status, title, body, type, expires_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [userId || null, targetPlan || null, targetStatus || null, title, bodyText, type,
-     expiresAt ? new Date(expiresAt + 'T23:59:59Z') : null]
+     new Date(expiresAt + 'T23:59:59Z')]
   );
   return { success: true };
 }

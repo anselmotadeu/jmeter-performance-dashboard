@@ -22,7 +22,7 @@ interface Stats {
 }
 
 interface UserRow {
-  id: string; name: string | null; email: string; created_at: string;
+  id: string; name: string | null; email: string; role: string | null; created_at: string;
   sub_status: string | null; plan_slug: string | null; plan_name: string | null;
   price_cents: number | null; current_period_end: string | null;
   cancel_at: string | null; canceled_at: string | null; pending_downgrade_plan: string | null;
@@ -458,7 +458,12 @@ function ClientsTab() {
               <tr key={u.id} className="border-t border-slate-700/50 hover:bg-slate-800/30 cursor-pointer"
                 onClick={() => setSelectedUser(u)}>
                 <td className="py-3 px-4">
-                  <p className="font-medium text-white text-sm">{u.name || '—'}</p>
+                  <p className="font-medium text-white text-sm flex items-center gap-1.5">
+                    {u.name || '—'}
+                    {u.role === 'super_admin' && (
+                      <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-bold text-indigo-300 uppercase tracking-wide">Super Admin</span>
+                    )}
+                  </p>
                   <p className="text-xs text-slate-400">{u.email}</p>
                 </td>
                 <td className="py-3 px-4">
@@ -490,7 +495,12 @@ function ClientsTab() {
           <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 space-y-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="font-bold text-white">{selectedUser.name || selectedUser.email}</p>
+                <p className="font-bold text-white flex items-center gap-1.5">
+                  {selectedUser.name || selectedUser.email}
+                  {selectedUser.role === 'super_admin' && (
+                    <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-bold text-indigo-300 uppercase tracking-wide">Super Admin</span>
+                  )}
+                </p>
                 <p className="text-xs text-slate-400">{selectedUser.email}</p>
               </div>
               <button onClick={() => { setSelectedUser(null); setActionMsg(null); }} className="text-slate-400 hover:text-white" aria-label="Fechar">✕</button>
@@ -615,9 +625,10 @@ function NotificationsTab() {
 
   async function send() {
     if (!form.title.trim() || !form.body.trim()) return;
+    if (!form.expiresAt) { setMsg({ type: 'error', text: '❌ Informe a data de vencimento da notificação.' }); return; }
     setSending(true); setMsg(null);
     try {
-      await adminPost('send_notification', { title: form.title, bodyText: form.body, type: form.type, targetPlan: form.targetPlan || null, targetStatus: form.targetStatus || null, expiresAt: form.expiresAt || null });
+      await adminPost('send_notification', { title: form.title, bodyText: form.body, type: form.type, targetPlan: form.targetPlan || null, targetStatus: form.targetStatus || null, expiresAt: form.expiresAt });
       setForm({ title: '', body: '', type: 'info', targetPlan: '', targetStatus: '', expiresAt: '' });
       setMsg({ type: 'success', text: '✅ Notificação enviada.' });
       notifQ.reload();
@@ -658,9 +669,10 @@ function NotificationsTab() {
             <option value="trialing">Trial</option>
           </select>
           <input type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
-            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white" />
+            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white" title="Vencimento (obrigatório)" />
+          <span className="self-center text-[10px] text-slate-500 uppercase tracking-wide">Vencimento *</span>
         </div>
-        <button onClick={send} disabled={sending || !form.title.trim() || !form.body.trim()}
+        <button onClick={send} disabled={sending || !form.title.trim() || !form.body.trim() || !form.expiresAt}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-bold text-white disabled:opacity-50">
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           {sending ? 'Enviando…' : 'Enviar notificação'}
