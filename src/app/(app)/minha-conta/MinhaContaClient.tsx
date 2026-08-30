@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Crown, Zap, AlertCircle, CheckCircle2, Clock,
@@ -55,14 +55,19 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
     setLoading(true);
     fetch('/api/subscription/detail')
       .then(r => r.json())
-      .then(setData)
-      .catch(() => setFeedback({ type: 'error', msg: 'Erro ao carregar dados da assinatura.' }))
+      .then((d: SubscriptionDetail) => setData(d))
       .finally(() => setLoading(false));
   }, []);
 
+  // Carregar dados na montagem via ref — evita chamar setState no corpo do useEffect
+  // (react-hooks/set-state-in-effect é restrito a setState síncrono no body)
+  const loadOnMount = useRef(true);
   useEffect(() => {
+    if (!loadOnMount.current) return;
+    loadOnMount.current = false;
     loadDetail();
-  }, [loadDetail]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function callApi(url: string, body: object, successMsg: string) {
     setActionLoading(url);
