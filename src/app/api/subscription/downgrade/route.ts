@@ -3,6 +3,7 @@ import { stripe } from '@/lib/stripe';
 import { PLANS, type PlanSlug } from '@/lib/plans';
 import { getActiveSubscription } from '@/lib/subscription';
 import { db } from '@/lib/db';
+import Stripe from 'stripe';
 
 /**
  * POST /api/subscription/downgrade
@@ -68,10 +69,10 @@ export async function POST(request: Request) {
       if (!reactivate) {
         return Response.json({ isCanceledScheduled: true, requiresReactivation: true }, { status: 200 });
       }
-      await stripe.subscriptions.update(sub.stripeSubscriptionId, {
-        cancel_at_period_end: false,
-        cancel_at: '',
-      });
+      const reactivateParams: Stripe.SubscriptionUpdateParams = {};
+      if (stripeSub.cancel_at_period_end) reactivateParams.cancel_at_period_end = false;
+      if (stripeSub.cancel_at != null) reactivateParams.cancel_at = null;
+      await stripe.subscriptions.update(sub.stripeSubscriptionId, reactivateParams);
       const reactivated = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
       if (reactivated.cancel_at_period_end || reactivated.cancel_at != null) {
         return Response.json({ error: 'O Stripe não confirmou a reativação da assinatura.' }, { status: 409 });
@@ -143,6 +144,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('[downgrade]', error);
-    return Response.json({ error: 'Erro ao processar downgrade.' }, { status: 500 });
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Erro ao processar downgrade.' },
+      { status: 500 },
+    );
   }
 }

@@ -3,6 +3,7 @@ import { stripe } from '@/lib/stripe';
 import { PLANS, type PlanSlug } from '@/lib/plans';
 import { getActiveSubscription } from '@/lib/subscription';
 import { db } from '@/lib/db';
+import Stripe from 'stripe';
 
 const PLAN_NAMES: Record<PlanSlug, string> = { grafico: 'Gráfico', panorama: 'Panorama' };
 
@@ -50,9 +51,11 @@ export async function POST(request: Request) {
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session?.user?.id) return Response.json({ error: 'Não autorizado.' }, { status: 401 });
 
-    const { planSlug, reactivate } = (await request.json()) as { planSlug: PlanSlug; reactivate?: boolean };
+    const body = (await request.json()) as { planSlug: PlanSlug; reactivate?: boolean };
 
-    if (!planSlug || !PLANS[planSlug]) {
+    const { planSlug, reactivate } = body;
+
+    if (!body || !planSlug || !PLANS[planSlug]) {
       return Response.json({ error: 'Plano inválido.' }, { status: 400 });
     }
 
@@ -81,26 +84,14 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Assinatura inválida.' }, { status: 400 });
     }
 
-    const hasCancelScheduled = stripeSub.cancel_at_period_end || stripeSub.cancel_at != null;
-
-    if (hasCancelScheduled) {
-      if (!reactivate) {
-        return Response.json({ isCanceledScheduled: true, requiresReactivation: true }, { status: 200 });
-      }
-      await stripe.subscriptions.update(sub.stripeSubscriptionId, {
-        cancel_at_period_end: false,
-        cancel_at: '',
-      });
-      const reactivated = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
-      if (reactivated.cancel_at_period_end || reactivated.cancel_at != null) {
-        return Response.json({ error: 'O Stripe não confirmou a reativação da assinatura.' }, { status: 409 });
-      }
-      console.log(`[upgrade] Cancelamento agendado removido para ${sub.stripeSubscriptionId}`);
-    }
-
+    // Liberar schedule de downgrade pendente antes de qualquer mudança
     const scheduleId = (stripeSub as unknown as Record<string, unknown>).schedule;
     if (scheduleId && typeof scheduleId === 'string') {
-      await stripe.subscriptionSchedules.release(scheduleId);
+      try {
+        await stripe.subscriptionSchedules.release(scheduleId);
+      } catch (err) {
+        console.error('[upgrade] Falha ao liberar schedule de downgrade:', err);
+      }
       await db.query(
         `UPDATE subscription SET pending_downgrade_plan = NULL, pending_downgrade_date = NULL, updated_at = NOW()
           WHERE stripe_subscription_id = $1`,
@@ -108,11 +99,33 @@ export async function POST(request: Request) {
       );
     }
 
+    // Reativação: remover cancelamento agendado de forma granular.
+    // Nunca envia cancel_at:'' junto de cancel_at_period_end:false (evita conflito na API).
+    let currentSub = stripeSub;
+    const hasCancelScheduled = stripeSub.cancel_at_period_end || stripeSub.cancel_at != null;
+
+    if (hasCancelScheduled) {
+      if (!reactivate) {
+        return Response.json({ isCanceledScheduled: true, requiresReactivation: true }, { status: 200 });
+      }
+      const reactivateParams: Stripe.SubscriptionUpdateParams = {};
+      if (stripeSub.cancel_at_period_end) reactivateParams.cancel_at_period_end = false;
+      if (stripeSub.cancel_at != null) reactivateParams.cancel_at = null;
+      console.log(`[upgrade] Reativando ${sub.stripeSubscriptionId} com params:`, reactivateParams);
+      await stripe.subscriptions.update(sub.stripeSubscriptionId, reactivateParams);
+      currentSub = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+      if (currentSub.cancel_at_period_end || currentSub.cancel_at != null) {
+        return Response.json({ error: 'O Stripe não confirmou a reativação da assinatura.' }, { status: 409 });
+      }
+      console.log(`[upgrade] Cancelamento agendado removido para ${sub.stripeSubscriptionId}`);
+    }
+
     const baseUrl = process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app';
 
+    // Calcular valor proporcional com base no estado PÓS-reativação
     const nowSec = Math.floor(Date.now() / 1000);
-    const periodEnd = getPeriodEnd(stripeSub);
-    const periodStart = getPeriodStart(stripeSub);
+    const periodEnd = getPeriodEnd(currentSub);
+    const periodStart = getPeriodStart(currentSub);
 
     if (!periodEnd) {
       return Response.json({ error: 'Não foi possível obter a data de renovação. Tente novamente.' }, { status: 500 });
@@ -136,6 +149,7 @@ export async function POST(request: Request) {
       amountDue = Math.round((newUnits - currentUnits) * (remainingSec / totalSec));
     }
 
+    // Renovação em < 4h: upgrade direto sem checkout
     const FOUR_HOURS = 4 * 60 * 60;
     if (amountDue <= 0 || (periodEnd - nowSec) <= FOUR_HOURS) {
       await stripe.subscriptions.update(sub.stripeSubscriptionId, {
@@ -147,6 +161,7 @@ export async function POST(request: Request) {
       return Response.json({ success: true, url: null });
     }
 
+    // Checkout Session de pagamento único — padrão EstilOS com CPF/CNPJ
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: sub.stripeCustomerId,
       mode: 'payment',
@@ -180,6 +195,7 @@ export async function POST(request: Request) {
     return Response.json({ url: checkoutSession.url });
   } catch (error) {
     console.error('[upgrade]', error);
-    return Response.json({ error: 'Erro ao processar upgrade.' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : 'Erro ao processar upgrade.';
+    return Response.json({ error: msg }, { status: 500 });
   }
 }
