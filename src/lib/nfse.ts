@@ -30,6 +30,16 @@ const CODIGO_SERVICO = '02660'; // Análise e desenvolvimento de sistemas
 const ALIQUOTA = '0.0200';
 const VERSAO_SCHEMA = 1;
 
+/**
+ * Retorna a data atual no fuso de Brasília (UTC-3) no formato YYYY-MM-DD.
+ * A prefeitura de SP rejeita datas "futuras" — o servidor Vercel opera em UTC,
+ * então usar toISOString() pode retornar amanhã quando são 21h-23h59 em SP.
+ */
+function todayBrasilia(): string {
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  return d.toISOString().split('T')[0];
+}
+
 const SOAP_METHODS = {
   emitir: {
     requestElement: 'EnvioLoteRPSRequest',
@@ -273,7 +283,7 @@ export async function testNFSeConnection(): Promise<{
   if (!cert) return { success: false, error: 'Certificado não configurado (NFSE_CERT_BASE64 / NFSE_CERT_PASSWORD)' };
 
   const rpsNumero = Math.floor(Math.random() * 900_000) + 100_000;
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBrasilia(); // UTC-3 Brasília
 
   try {
     const rpsXml = buildRpsXml({
@@ -349,7 +359,7 @@ export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
   }
 
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayBrasilia(); // UTC-3 Brasília — prefeitura SP rejeita datas futuras
     const discriminacao =
       `Licença Performance Dashboard - Plano ${input.plano} - ${input.mesReferencia}. ` +
       `Serviço de acesso a software de análise de performance de testes via internet (SaaS). ` +
