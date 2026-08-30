@@ -4,7 +4,7 @@
  * CNPJ e Inscrição Municipal são da ANSTECH — mesmos em todos os projetos.
  *
  * Deps: node-forge, xml-crypto
- * Vars de env: NFSE_CERT_BASE64, NFSE_CERT_PASSWORD, NFSE_HOMOLOGACAO
+ * Vars de env: NFSE_CERT_BASE64, NFSE_CERT_PASSWORD
  */
 
 import crypto from 'crypto';
@@ -329,7 +329,9 @@ export async function probeNFSeEndpoints(): Promise<{ homo: string; prod: string
 }
 
 export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
-  const homologacao = process.env.NFSE_HOMOLOGACAO === 'true';
+  // Emissão sempre em PRODUÇÃO (EnvioLoteRPS/WS_PROD): em HML a Prefeitura
+  // processa o lote mas NÃO devolve os números das NFS-e (vêm por consulta),
+  // então a nota não fica validável. Correções são feitas via cancelamento.
   const cert = await loadCertificate();
   if (!cert) throw new Error('Certificado NFS-e não configurado');
 
@@ -359,11 +361,10 @@ export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
 
   try {
     const today = todayBrasilia(); // UTC-3 Brasília — prefeitura SP rejeita datas futuras
-    const discriminacao = homologacao
-      ? `HOMOLOGAÇÃO - Plataforma de teste Performance Dashboard - Plano ${input.plano} - ${input.mesReferencia}. Nao gera obrigacao fiscal.`
-      : `Licença Performance Dashboard - Plano ${input.plano} - ${input.mesReferencia}. ` +
-        `Serviço de acesso a software de análise de performance de testes via internet (SaaS). ` +
-        `ANSTECH - QUALITY ASSURANCE LTDA - CNPJ 48.847.227/0001-01.`;
+    const discriminacao =
+      `Licença Performance Dashboard - Plano ${input.plano} - ${input.mesReferencia}. ` +
+      `Serviço de acesso a software de análise de performance de testes via internet (SaaS). ` +
+      `ANSTECH - QUALITY ASSURANCE LTDA - CNPJ 48.847.227/0001-01.`;
 
     const rpsXml = buildRpsXml({
       rpsNumero: emissionId, dataEmissao: today,
@@ -374,10 +375,10 @@ export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
     });
 
     const signedXml = await signXml(rpsXml, cert.keyPem, cert.certPem, cert.certB64);
-    const method = homologacao ? SOAP_METHODS.testar : SOAP_METHODS.emitir;
+    const method = SOAP_METHODS.emitir;
     const soapBody = buildSoapEnvelope(signedXml, method.requestElement);
     const response = await httpsPost(
-      homologacao ? WS_HOMO : WS_PROD,
+      WS_PROD,
       soapBody, makeMTLSAgent(cert), method.soapAction
     );
 
@@ -389,13 +390,13 @@ export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
         `UPDATE nfse_emission SET status='emitted', nfse_numero=$1, codigo_verificacao=$2, verificacao_url=$3, updated_at=NOW() WHERE id=$4`,
         [nfseNumero, codigoVerificacao, verificacaoUrl, emissionId]
       );
-      console.log(`[NFS-e] NFS-e #${nfseNumero} emitida${homologacao ? ' (HOMOLOGAÇÃO)' : ''} para invoice ${input.stripeInvoiceId}`);
+      console.log(`[NFS-e] NFS-e #${nfseNumero} emitida para invoice ${input.stripeInvoiceId}`);
     } else {
       let errorMessage = parseError(response);
-      // Homologação: guarda o conteúdo útil no erro e a resposta completa no log
-      if (homologacao && errorMessage.startsWith('Resposta inesperada')) {
-        console.error('[NFS-e] Resposta inesperada (HOMOLOGAÇÃO):', response);
-        errorMessage = `Resposta inesperada (HOMOLOGAÇÃO): ${decodeRetornoXml(response).slice(0, 2000)}`;
+      // Resposta sem número: guarda o conteúdo útil do Retorno e o SOAP no log
+      if (errorMessage.startsWith('Resposta inesperada')) {
+        console.error('[NFS-e] Resposta inesperada:', response);
+        errorMessage = `${errorMessage}\nDetalhe: ${decodeRetornoXml(response).slice(0, 2000)}`;
       }
       await db.query(`UPDATE nfse_emission SET status='error', error_message=$1, updated_at=NOW() WHERE id=$2`, [errorMessage, emissionId]);
       throw new Error(errorMessage);
