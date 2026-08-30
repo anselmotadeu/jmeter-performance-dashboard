@@ -333,7 +333,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, eventCr
       return;
     }
 
-    const applied = await upsertSubscription({
+    await upsertSubscription({
       userId: upgradeUserId,
       planId: planResult.rows[0].id,
       stripeCustomerId: customerId,
@@ -344,12 +344,14 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session, eventCr
       cancelAt: getCancelAt(updated),
       eventCreated,
     });
-    if (!applied) return;
     await db.query(
       `UPDATE subscription SET pending_downgrade_plan = NULL, pending_downgrade_date = NULL, updated_at = NOW()
         WHERE stripe_subscription_id = $1`,
       [subscriptionId]
     );
+    // NFS-e do pagamento proporcional NUNCA pode ficar de fora por evento fora de
+    // ordem: se o upsert foi ignorado (estado já mais novo no banco), o pagamento
+    // ainda aconteceu e precisa virar nota fiscal.
     await emitirNFSeForUpgradeSession(session);
     console.log(`[webhook] upgrade.completed: userId=${upgradeUserId} plan=${planSlug} sub=${subscriptionId}`);
   }

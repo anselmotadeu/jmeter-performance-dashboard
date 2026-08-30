@@ -1,6 +1,7 @@
 {
   "buildCommand": "npm run migrate && npm run build",
   "crons": [
-    { "path": "/api/trial-check", "schedule": "0 12 * * *" }
+    { "path": "/api/trial-check", "schedule": "0 12 * * *" },
+    { "path": "/api/nfse-reconcile", "schedule": "0 4 * * *" }
   ]
 }

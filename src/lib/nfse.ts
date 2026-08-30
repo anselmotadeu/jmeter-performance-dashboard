@@ -440,17 +440,19 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
   checked: number; processed: number; failed: number; errors: Array<{ invoiceId: string; error: string }>;
 }> {
   const { stripe } = await import('@/lib/stripe');
-  const { emitirNFSeForInvoice } = await import('@/lib/nfse-webhook');
+  const { emitirNFSeForInvoice, emitirNFSeForUpgradeSession } = await import('@/lib/nfse-webhook');
 
-  const invoices = await stripe.invoices.list({
-    status: 'paid',
-    created: { gte: Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60 },
-    limit: 25,
-  });
+  const since = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
   let processed = 0;
   let failed = 0;
   const errors: Array<{ invoiceId: string; error: string }> = [];
+
+  const invoices = await stripe.invoices.list({
+    status: 'paid',
+    created: { gte: since },
+    limit: 25,
+  });
 
   for (const invoice of invoices.data) {
     const raw = invoice as unknown as Record<string, number>;
@@ -467,7 +469,31 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
     }
   }
 
-  return { checked: invoices.data.length, processed, failed, errors };
+  // Checkouts pagos de upgrade (mode=payment) que ainda não geraram NFS-e.
+  // Recovery de notas perdidas por evento fora de ordem no webhook ou falha
+  // silenciosa — o pagamento proporcional do upgrade sempre exige nota.
+  const sessions = await stripe.checkout.sessions.list({
+    created: { gte: since },
+    limit: 100,
+  });
+
+  for (const session of sessions.data) {
+    const meta = (session.metadata ?? {}) as Record<string, string>;
+    if (meta.type !== 'upgrade' || session.payment_status !== 'paid') continue;
+    const sourceId = `checkout_${session.id}`;
+    try {
+      const before = await getNFSeEmission(sourceId);
+      if (before?.status === 'canceled') continue;
+      await emitirNFSeForUpgradeSession(session);
+      const after = await getNFSeEmission(sourceId);
+      if (before?.status !== 'emitted' && after?.status === 'emitted') processed++;
+    } catch (err) {
+      failed++;
+      errors.push({ invoiceId: sourceId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { checked: invoices.data.length + sessions.data.length, processed, failed, errors };
 }
 
 export async function reconcileNFSePayment(stripeInvoiceId: string): Promise<{ emitted: boolean; message: string }> {

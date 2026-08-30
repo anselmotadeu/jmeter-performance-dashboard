@@ -123,21 +123,6 @@ function billingLayout(body: string, previewText = '') {
     .em-footer { background:#f8fafc; }
     .em-footer-text { color:#94a3b8; }
     .em-divider-td { border-top:1px solid #e2e8f0; }
-    @media (prefers-color-scheme: dark) {
-      .em-wrapper { background:#0f172a !important; }
-      .em-card { background:#1e293b !important;color:#f1f5f9 !important; }
-      .em-h1 { color:#f8fafc !important; }
-      .em-body { color:#cbd5e1 !important; }
-      .em-overline { color:#64748b !important; }
-      .em-strong { color:#f1f5f9 !important; }
-      .em-muted { color:#64748b !important; }
-      .em-inner { background:#0f172a !important;border-color:#334155 !important; }
-      .em-meta-key { color:#64748b !important; }
-      .em-meta-val { color:#e2e8f0 !important; }
-      .em-footer { background:#1e293b !important; }
-      .em-footer-text { color:#475569 !important; }
-      .em-divider-td { border-top-color:#334155 !important; }
-    }
   </style>
 </head>
 <body class="em-wrapper" style="margin:0;padding:0;background:#f1f5f9;">
