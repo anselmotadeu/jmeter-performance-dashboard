@@ -146,6 +146,25 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
     }
   }
 
+  async function reconcileAllNFSe() {
+    setLoading('nfse-reconcile-all');
+    try {
+      const res = await fetch('/api/admin/nfse/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reconcileAll: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Erro ao reconciliar pagamentos');
+      showBanner('success', data.message ?? 'Reconciliação concluída.');
+      await refreshNFSe();
+    } catch (err) {
+      showBanner('error', err instanceof Error ? err.message : 'Erro ao reconciliar pagamentos');
+    } finally {
+      setLoading(null);
+    }
+  }
+
   async function refreshNFSe() {
     // Reload da página para atualizar dados server-side da lista NFS-e
     // (listRecentNFSeEmissions é chamada no server component)
@@ -298,8 +317,19 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
 
       {/* Seção NFS-e */}
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-          <h2 className="text-lg font-bold">NFS-e — Últimas emissões</h2>
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+          <div>
+            <h2 className="text-lg font-bold">NFS-e — Últimas emissões</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Varre invoices pagas e checkouts de upgrade para emitir notas represadas + e-mail</p>
+          </div>
+          <button
+            onClick={reconcileAllNFSe}
+            disabled={loading === 'nfse-reconcile-all'}
+            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading === 'nfse-reconcile-all' ? 'animate-spin' : ''}`} />
+            {loading === 'nfse-reconcile-all' ? 'Reconciliando…' : 'Reconciliar pagamentos'}
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
