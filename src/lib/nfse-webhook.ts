@@ -1,8 +1,8 @@
 /**
- * nfse-webhook.ts
+ * nfse-webhook.ts — Performance Dashboard
  * Integração NFS-e com os eventos do Stripe.
- * Separado do webhook principal para manter o fluxo limpo.
- * Padrão EstilOS (server/billing.ts → emitNFSeForInvoice).
+ * Espelho fiel do TestDiff (src/lib/nfse-webhook.ts).
+ * Adaptado: planos grafico/panorama.
  */
 
 import { stripe } from '@/lib/stripe';
@@ -13,30 +13,42 @@ import Stripe from 'stripe';
 
 const FISCAL_DOCUMENT_KEY = 'cpf_cnpj';
 
-/** Extrai CPF/CNPJ do custom_field gravado no Stripe Checkout */
-async function syncCheckoutTaxId(customerId: string, stripeInvoiceId: string): Promise<string | null> {
-  // Buscar checkout session associada à invoice
+/** Extrai subscription_id da invoice — compatível com Stripe SDK v14+ */
+export function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+  const raw = invoice as unknown as {
+    subscription?: string | { id?: string } | null;
+    parent?: { subscription_details?: { subscription?: string | { id?: string } | null } | null } | null;
+  };
+  const subscription = raw.parent?.subscription_details?.subscription ?? raw.subscription;
+  if (typeof subscription === 'string') return subscription;
+  return subscription?.id ?? null;
+}
+
+/** Extrai CPF/CNPJ do custom_field do checkout ou dos tax_ids do customer */
+async function syncCheckoutTaxId(customerId: string): Promise<string | null> {
   const sessions = await stripe.checkout.sessions.list({
     customer: customerId, status: 'complete', limit: 5,
   });
-
   for (const session of sessions.data) {
     const field = session.custom_fields?.find((f) => f.key === FISCAL_DOCUMENT_KEY);
     const value = field?.text?.value?.replace(/\D/g, '') ?? '';
     if (value.length === 11 || value.length === 14) return value;
   }
-
-  // Fallback: tax_ids no customer do Stripe
   const taxIds = await stripe.customers.listTaxIds(customerId, { limit: 10 });
   const taxId = taxIds.data.find((t) => t.type === 'br_cpf' || t.type === 'br_cnpj');
   return taxId?.value?.replace(/\D/g, '') ?? null;
 }
 
-/** Busca userId no banco pelo stripe_customer_id */
+function checkoutTaxId(session: Stripe.Checkout.Session): string | null {
+  const field = session.custom_fields?.find((item) => item.key === FISCAL_DOCUMENT_KEY);
+  const value = field?.text?.value?.replace(/\D/g, '') ?? '';
+  return value.length === 11 || value.length === 14 ? value : null;
+}
+
+/** Busca userId + email + nome pelo stripe_customer_id */
 async function getUserByCustomer(customerId: string): Promise<{ userId: string; email: string; name: string } | null> {
   const r = await db.query<{ user_id: string; user_email: string | null }>(
-    `SELECT s.user_id,
-            u.email as user_email
+    `SELECT s.user_id, u.email as user_email
      FROM subscription s
      JOIN "user" u ON u.id = s.user_id
      WHERE s.stripe_customer_id = $1 LIMIT 1`,
@@ -44,7 +56,6 @@ async function getUserByCustomer(customerId: string): Promise<{ userId: string; 
   );
   if (r.rows.length === 0) return null;
   const row = r.rows[0];
-  // Buscar nome do usuário
   const nameRow = await db.query<{ name: string | null }>(`SELECT name FROM "user" WHERE id = $1 LIMIT 1`, [row.user_id]);
   return {
     userId: row.user_id,
@@ -53,10 +64,95 @@ async function getUserByCustomer(customerId: string): Promise<{ userId: string; 
   };
 }
 
+/** Converte endereço Stripe → formato da prefeitura SP via ViaCEP */
+async function buildAddress(address: Stripe.Address | null | undefined): Promise<Parameters<typeof emitirNFSe>[0]['endereco']> {
+  if (address?.country !== 'BR' || !address.postal_code) return undefined;
+  try {
+    const cep = address.postal_code.replace(/\D/g, '');
+    const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`, { signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) return undefined;
+    const viaCep = await response.json() as Record<string, string>;
+    if (viaCep.erro || !viaCep.ibge || !viaCep.logradouro) return undefined;
+    const numero = address.line1?.match(/[,\s](\d+[A-Za-z-]*)$/)?.[1]
+      ?? address.line2?.match(/^\s*(\d+[A-Za-z-]*)/)?.[1]
+      ?? 'S/N';
+    return {
+      logradouro: String(viaCep.logradouro).slice(0, 50),
+      numero: numero.slice(0, 10),
+      ...(address.line2 ? { complemento: address.line2.slice(0, 30) } : {}),
+      bairro: String(viaCep.bairro).slice(0, 30),
+      cidadeIbge: viaCep.ibge,
+      uf: address.state || viaCep.uf,
+      cep,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Emite NFS-e para uma invoice paga.
- * Fire-and-forget — não bloqueia o webhook.
- * Padrão EstilOS (server/billing.ts → emitNFSeForInvoice).
+ * Garante emissão e envio de e-mail da NFS-e (idempotente).
+ * Evita emissão dupla via getNFSeEmission + status check.
+ */
+async function ensureIssuedAndEmailed(params: {
+  sourceId: string;
+  user: { userId: string; email: string; name: string };
+  amountCents: number;
+  cpfCnpj: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  address?: Stripe.Address | null;
+  planSlug: string;
+  mesReferencia: string;
+}) {
+  const tipoPessoa = params.cpfCnpj.length === 11 ? 'CPF' : 'CNPJ';
+  const planoNome = params.planSlug === 'panorama' ? 'Panorama' : 'Gráfico';
+
+  // Verificar se já foi emitida (idempotência)
+  const existing = await getNFSeEmission(params.sourceId);
+  if (existing?.status !== 'emitted') {
+    await emitirNFSe({
+      stripeInvoiceId: params.sourceId,
+      userId: params.user.userId,
+      valorServicos: params.amountCents / 100,
+      cnpjOuCpf: params.cpfCnpj,
+      tipoPessoa,
+      razaoSocial: params.customerName || params.user.name || params.user.email || 'Cliente Performance Dashboard',
+      email: params.customerEmail || params.user.email || undefined,
+      endereco: await buildAddress(params.address),
+      plano: planoNome,
+      mesReferencia: params.mesReferencia,
+    });
+  }
+
+  // Enviar e-mail se NFS-e emitida e e-mail ainda não enviado
+  const emission = await getNFSeEmission(params.sourceId);
+  if (!emission?.nfse_numero || emission.email_sent_at) return;
+  const recipient = params.customerEmail || params.user.email;
+  if (!recipient) return;
+
+  try {
+    await sendNFSeEmail({
+      to: recipient,
+      userName: params.user.name || params.user.email,
+      nfseNumero: emission.nfse_numero,
+      codigoVerificacao: emission.codigo_verificacao,
+      verificacaoUrl: emission.verificacao_url || 'https://nfe.prefeitura.sp.gov.br/publico/verificacao.aspx',
+      valorServicos: params.amountCents / 100,
+      planName: planoNome,
+      mesReferencia: params.mesReferencia,
+    });
+    await markNFSeEmailSent(emission.id, recipient);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await markNFSeEmailError(emission.id, recipient, message);
+    throw error;
+  }
+}
+
+/**
+ * Emite NFS-e para uma invoice paga (assinatura nova ou renovação).
+ * Idempotente: não emite se já existe registro 'emitted' para este invoiceId.
  */
 export async function emitirNFSeForInvoice(invoice: Stripe.Invoice): Promise<void> {
   const amountPaid = (invoice as unknown as Record<string, number>).amount_paid ?? 0;
@@ -69,58 +165,21 @@ export async function emitirNFSeForInvoice(invoice: Stripe.Invoice): Promise<voi
   if (!customerId) return;
 
   try {
-    // Verificar se já foi emitida
-    const existingEmission = await getNFSeEmission(invoiceId);
-    if (existingEmission?.status === 'emitted') return;
-
     const user = await getUserByCustomer(customerId);
     if (!user) {
       console.warn(`[NFS-e] Customer ${customerId} sem usuário vinculado — skip`);
       return;
     }
 
-    // Obter CPF/CNPJ do checkout
-    const cpfCnpjDigits = await syncCheckoutTaxId(customerId, invoiceId);
+    const cpfCnpjDigits = await syncCheckoutTaxId(customerId);
     if (!cpfCnpjDigits) {
       console.warn(`[NFS-e] CPF/CNPJ não encontrado para customer ${customerId} invoice ${invoiceId} — skip`);
       return;
     }
 
-    const tipoPessoa = cpfCnpjDigits.length === 11 ? 'CPF' : 'CNPJ';
-    const razaoSocial = invoice.customer_name || user.name || user.email || 'Cliente Performance Dashboard';
-
-    // Obter endereço do Stripe (via ViaCEP se houver CEP)
-    let endereco: Parameters<typeof emitirNFSe>[0]['endereco'];
-    const address = invoice.customer_address;
-    if (address?.country === 'BR' && address.postal_code) {
-      try {
-        const cep = address.postal_code.replace(/\D/g, '');
-        const viaCepRes = await fetch(`https://viacep.com.br/ws/${cep}/json/`, {
-          signal: AbortSignal.timeout(5_000),
-        });
-        if (viaCepRes.ok) {
-          const viaCep = await viaCepRes.json() as Record<string, string>;
-          if (!viaCep.erro && viaCep.ibge && viaCep.logradouro) {
-            const numero = address.line1?.match(/[,\s](\d+[A-Za-z-]*)$/)?.[1]
-              ?? address.line2?.match(/^\s*(\d+[A-Za-z-]*)/)?.[1]
-              ?? 'S/N';
-            endereco = {
-              logradouro: String(viaCep.logradouro).slice(0, 50),
-              numero: numero.slice(0, 10),
-              ...(address.line2 ? { complemento: address.line2.slice(0, 30) } : {}),
-              bairro: String(viaCep.bairro).slice(0, 30),
-              cidadeIbge: viaCep.ibge,
-              uf: address.state || viaCep.uf,
-              cep,
-            };
-          }
-        }
-      } catch { /* endereço é opcional — continua sem */ }
-    }
-
     // Determinar plano a partir da subscription
-    const subId = (invoice as unknown as Record<string, unknown>).subscription as string | null;
-    let planSlug = 'grafico';
+    const subId = getInvoiceSubscriptionId(invoice);
+    let planSlug = invoice.metadata?.planSlug || 'grafico';
     if (subId) {
       const planRow = await db.query<{ slug: string }>(
         `SELECT p.slug FROM subscription s JOIN plan p ON p.id = s.plan_id
@@ -130,52 +189,52 @@ export async function emitirNFSeForInvoice(invoice: Stripe.Invoice): Promise<voi
       if (planRow.rows[0]) planSlug = planRow.rows[0].slug;
     }
 
-    const planoNome = planSlug === 'panorama' ? 'Panorama' : 'Gráfico';
     const periodStart = (invoice as unknown as Record<string, number>).period_start
       ? new Date((invoice as unknown as Record<string, number>).period_start * 1000)
       : new Date();
     const mesReferencia = periodStart.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-    await emitirNFSe({
-      stripeInvoiceId: invoiceId,
-      userId: user.userId,
-      valorServicos: amountPaid / 100,
-      cnpjOuCpf: cpfCnpjDigits,
-      tipoPessoa,
-      razaoSocial,
-      email: invoice.customer_email || user.email || undefined,
-      endereco,
-      plano: planoNome,
+    await ensureIssuedAndEmailed({
+      sourceId: invoiceId,
+      user,
+      amountCents: amountPaid,
+      cpfCnpj: cpfCnpjDigits,
+      customerName: invoice.customer_name,
+      customerEmail: invoice.customer_email,
+      address: invoice.customer_address,
+      planSlug,
       mesReferencia,
     });
-
-    // Enviar email com a NFS-e ao usuário (padrão EstilOS billing.ts)
-    const emission = await getNFSeEmission(invoiceId);
-    if (emission?.nfse_numero && !emission.email_sent_at) {
-      const recipient = invoice.customer_email || user.email;
-      if (recipient) {
-        try {
-          await sendNFSeEmail({
-            to: recipient,
-            userName: user.name || user.email,
-            nfseNumero: emission.nfse_numero,
-            codigoVerificacao: emission.codigo_verificacao,
-            verificacaoUrl: emission.verificacao_url || 'https://nfe.prefeitura.sp.gov.br/publico/verificacao.aspx',
-            valorServicos: amountPaid / 100,
-            planName: planoNome,
-            mesReferencia,
-          });
-          await markNFSeEmailSent(emission.id, recipient);
-        } catch (emailErr) {
-          const msg = emailErr instanceof Error ? emailErr.message : String(emailErr);
-          await markNFSeEmailError(emission.id, recipient, msg);
-          console.error(`[NFS-e] Falha ao enviar email para ${recipient}: ${msg}`);
-        }
-      }
-    }
     console.log(`[NFS-e] Emissão concluída para invoice ${invoiceId}`);
   } catch (err) {
     console.error(`[NFS-e] Falha para invoice ${invoiceId}:`, err);
-    // Não re-throw — NFS-e não deve bloquear o webhook
+    throw err;
   }
+}
+
+/** Emite NFS-e para o pagamento proporcional de upgrade (Checkout mode=payment). */
+export async function emitirNFSeForUpgradeSession(session: Stripe.Checkout.Session): Promise<void> {
+  if (session.payment_status !== 'paid' || !session.id || !session.amount_total) return;
+  const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+  if (!customerId) return;
+
+  const user = await getUserByCustomer(customerId);
+  if (!user) throw new Error(`Customer ${customerId} sem usuário vinculado.`);
+  const cpfCnpj = checkoutTaxId(session) ?? await syncCheckoutTaxId(customerId);
+  if (!cpfCnpj) throw new Error(`CPF/CNPJ não encontrado para checkout ${session.id}.`);
+
+  const planSlug = session.metadata?.planSlug || 'panorama';
+  const mesReferencia = `upgrade proporcional - ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`;
+  await ensureIssuedAndEmailed({
+    sourceId: `checkout_${session.id}`,
+    user,
+    amountCents: session.amount_total,
+    cpfCnpj,
+    customerName: session.customer_details?.name,
+    customerEmail: session.customer_details?.email,
+    address: session.customer_details?.address,
+    planSlug,
+    mesReferencia,
+  });
+  console.log(`[NFS-e] Emissão concluída para upgrade checkout ${session.id}`);
 }

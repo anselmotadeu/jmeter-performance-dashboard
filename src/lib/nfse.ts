@@ -433,7 +433,12 @@ export async function listRecentNFSeEmissions() {
     id: number; stripe_invoice_id: string; user_id: string | null;
     status: string; nfse_numero: string | null; created_at: Date;
     email_sent_at: Date | null; error_message: string | null;
-  }>(`SELECT * FROM nfse_emission ORDER BY id DESC LIMIT 50`);
+  }>(
+    // Excluir registros de controle de e-mail (confirm_email_*) — são artefatos internos
+    `SELECT * FROM nfse_emission
+     WHERE stripe_invoice_id NOT LIKE 'confirm_email_%'
+     ORDER BY id DESC LIMIT 50`
+  );
   return r.rows;
 }
 
