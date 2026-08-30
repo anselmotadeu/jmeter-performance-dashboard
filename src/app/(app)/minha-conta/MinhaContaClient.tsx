@@ -39,7 +39,15 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
   const [data, setData] = useState<SubscriptionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(() => {
+    // Inicializar com parâmetros de retorno do Stripe (sem useEffect)
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get('upgrade');
+    if (p === 'success') return { type: 'success', msg: 'Upgrade realizado com sucesso! O plano será atualizado em instantes.' };
+    if (p === 'canceled') return { type: 'error', msg: 'Upgrade cancelado. Nenhuma cobrança foi realizada.' };
+    return null;
+  });
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showReactivateModal, setShowReactivateModal] = useState<{ action: 'upgrade' | 'downgrade'; planSlug: string } | null>(null);
 
@@ -54,15 +62,6 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
 
   useEffect(() => {
     loadDetail();
-    // Verificar parâmetros de retorno do Stripe (lidos de forma segura fora do ciclo de render)
-    const params = new URLSearchParams(window.location.search);
-    const upgradeParam = params.get('upgrade');
-    if (upgradeParam === 'success') {
-      // Usar setTimeout para evitar setState síncrono no corpo do effect
-      setTimeout(() => setFeedback({ type: 'success', msg: 'Upgrade realizado com sucesso! O plano será atualizado em instantes.' }), 0);
-    } else if (upgradeParam === 'canceled') {
-      setTimeout(() => setFeedback({ type: 'error', msg: 'Upgrade cancelado. Nenhuma cobrança foi realizada.' }), 0);
-    }
   }, [loadDetail]);
 
   async function callApi(url: string, body: object, successMsg: string) {
