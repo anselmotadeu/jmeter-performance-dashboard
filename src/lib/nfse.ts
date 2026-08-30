@@ -224,11 +224,21 @@ function httpsPost(url: string, body: string, agent: https.Agent | null, soapAct
 }
 
 function decodeRetornoXml(soap: string): string {
-  const match = soap.match(/<RetornoXML>([\s\S]*?)<\/RetornoXML>/);
+  const match = soap.match(/<RetornoXML[^>]*>([\s\S]*?)<\/RetornoXML>/);
   if (!match) return soap;
-  return match[1]
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  let inner = match[1];
+  // Se vier envolto em CDATA, remove o wrapper
+  const cdata = inner.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
+  if (cdata) inner = cdata[1];
+  // Unescape iterativo: a Prefeitura pode escapar o XML interno mais de uma vez
+  for (let i = 0; i < 5; i++) {
+    const decoded = inner
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+    if (decoded === inner) break;
+    inner = decoded;
+  }
+  return inner;
 }
 
 function parseNfseNumero(xml: string): string | null {
@@ -381,7 +391,12 @@ export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
       );
       console.log(`[NFS-e] NFS-e #${nfseNumero} emitida${homologacao ? ' (HOMOLOGAÇÃO)' : ''} para invoice ${input.stripeInvoiceId}`);
     } else {
-      const errorMessage = parseError(response);
+      let errorMessage = parseError(response);
+      // Homologação: guarda o conteúdo útil no erro e a resposta completa no log
+      if (homologacao && errorMessage.startsWith('Resposta inesperada')) {
+        console.error('[NFS-e] Resposta inesperada (HOMOLOGAÇÃO):', response);
+        errorMessage = `Resposta inesperada (HOMOLOGAÇÃO): ${decodeRetornoXml(response).slice(0, 2000)}`;
+      }
       await db.query(`UPDATE nfse_emission SET status='error', error_message=$1, updated_at=NOW() WHERE id=$2`, [errorMessage, emissionId]);
       throw new Error(errorMessage);
     }
