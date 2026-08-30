@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       case 'customer.subscription.deleted':
         await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
         break;
+      case 'invoice.paid':              // alias — processar igual a payment_succeeded
       case 'invoice.payment_succeeded':
         await handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);
         break;
@@ -109,6 +110,54 @@ async function upsertSubscription(params: {
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 async function handleCheckout(session: Stripe.Checkout.Session) {
+  const meta = (session.metadata ?? {}) as Record<string, string>;
+
+  // ── Upgrade pro-rata (mode=payment) ──────────────────────────────────────
+  if (session.mode === 'payment' && meta.type === 'upgrade') {
+    const { userId, planSlug, subscriptionId, newPriceId, itemId } = meta;
+    if (!userId || !planSlug || !subscriptionId || !newPriceId || !itemId) {
+      console.warn('[webhook] upgrade: metadados incompletos', meta);
+      return;
+    }
+
+    // Atualizar assinatura no Stripe
+    await stripe.subscriptions.update(subscriptionId, {
+      items: [{ id: itemId, price: newPriceId }],
+      proration_behavior: 'none',
+      metadata: { userId, planSlug },
+    });
+
+    // Atualizar banco
+    const planResult = await db.query<{ id: string; name: string; price_cents: number }>(
+      `SELECT id, name, price_cents FROM plan WHERE slug = $1`, [planSlug]
+    );
+    if (planResult.rows[0]) {
+      await db.query(
+        `UPDATE subscription SET plan_id = $1, updated_at = NOW() WHERE stripe_subscription_id = $2`,
+        [planResult.rows[0].id, subscriptionId]
+      );
+      // E-mail de confirmação de upgrade
+      sendConfirmationEmail(userId, planResult.rows[0].name, planResult.rows[0].price_cents, null)
+        .catch(err => console.error('[webhook] email upgrade falhou:', err));
+    }
+
+    // NFS-e para o pagamento do upgrade (fire-and-forget)
+    import('@/lib/nfse-webhook').then(async ({ emitirNFSeForInvoice }) => {
+      // Buscar a invoice gerada pelo payment_intent desta session
+      const paymentIntentId = session.payment_intent as string;
+      if (!paymentIntentId) return;
+      const charges = await stripe.charges.list({ payment_intent: paymentIntentId, limit: 1 });
+      const invoiceId = charges.data[0]?.invoice;
+      if (!invoiceId || typeof invoiceId !== 'string') return;
+      const invoice = await stripe.invoices.retrieve(invoiceId);
+      await emitirNFSeForInvoice(invoice);
+    }).catch(err => console.error('[webhook] NFS-e upgrade falhou:', err));
+
+    console.log(`[webhook] upgrade: userId=${userId} plan=${planSlug} sub=${subscriptionId}`);
+    return;
+  }
+
+  // ── Checkout de nova assinatura (mode=subscription) ───────────────────────
   if (session.mode !== 'subscription') return;
 
   const customerId = session.customer as string;
