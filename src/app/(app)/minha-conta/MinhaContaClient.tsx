@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  Crown, Zap, Calendar, AlertCircle, CheckCircle2, Clock,
+  Crown, Zap, AlertCircle, CheckCircle2, Clock,
   Loader2, XCircle, ExternalLink, AlertTriangle, ArrowUpRight, ArrowDownRight, Ban,
 } from 'lucide-react';
 
@@ -54,10 +54,15 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
 
   useEffect(() => {
     loadDetail();
-    // Verificar parâmetros de retorno do Stripe
+    // Verificar parâmetros de retorno do Stripe (lidos de forma segura fora do ciclo de render)
     const params = new URLSearchParams(window.location.search);
-    if (params.get('upgrade') === 'success') setFeedback({ type: 'success', msg: 'Upgrade realizado com sucesso! O plano será atualizado em instantes.' });
-    if (params.get('upgrade') === 'canceled') setFeedback({ type: 'error', msg: 'Upgrade cancelado. Nenhuma cobrança foi realizada.' });
+    const upgradeParam = params.get('upgrade');
+    if (upgradeParam === 'success') {
+      // Usar setTimeout para evitar setState síncrono no corpo do effect
+      setTimeout(() => setFeedback({ type: 'success', msg: 'Upgrade realizado com sucesso! O plano será atualizado em instantes.' }), 0);
+    } else if (upgradeParam === 'canceled') {
+      setTimeout(() => setFeedback({ type: 'error', msg: 'Upgrade cancelado. Nenhuma cobrança foi realizada.' }), 0);
+    }
   }, [loadDetail]);
 
   async function callApi(url: string, body: object, successMsg: string) {

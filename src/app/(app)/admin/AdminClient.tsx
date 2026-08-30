@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import { Shield, Users, TrendingUp, TrendingDown, DollarSign, RefreshCw, Send, Ban, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Shield, Users, TrendingUp, TrendingDown, DollarSign, RefreshCw, Send, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ function StatusBadge({ status }: { status: string | null }) {
 
 export default function AdminClient({ initialUsers, initialNFSe, initialMRR, totalUsers, activeSubscriptions }: Props) {
   const [users, setUsers] = useState<UserRow[]>(initialUsers);
-  const [nfseList, setNFSeList] = useState<NFSeRow[]>(initialNFSe);
+  const [nfseList] = useState<NFSeRow[]>(initialNFSe);
   const [mrr, setMRR] = useState<MRR>(initialMRR);
   const [banner, setBanner] = useState<{ type: BannerType; message: string } | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
