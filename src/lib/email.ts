@@ -91,24 +91,88 @@ function canSendEmail() {
   return true;
 }
 
+function ctaButton(label: string, url: string, color = '#4f46e5'): string {
+  return `<table cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td style="border-radius:12px;background:${color};box-shadow:0 4px 14px rgba(79,70,229,0.25);">
+        <a href="${url}" style="display:inline-block;padding:16px 36px;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;letter-spacing:-0.3px;border-radius:12px;">${label}</a>
+      </td>
+    </tr>
+  </table>`;
+}
+
 function billingLayout(body: string, previewText = '') {
-  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/>
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Performance Dashboard</title>
+  <style>
+    body { margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    .em-wrapper { background:#f1f5f9; }
+    .em-card { background:#ffffff;color:#0f172a; }
+    .em-h1 { color:#0f172a; }
+    .em-body { color:#475569; }
+    .em-overline { color:#94a3b8; }
+    .em-strong { color:#1e293b; }
+    .em-muted { color:#94a3b8; }
+    .em-inner { background:#f8fafc;border:1px solid #e2e8f0; }
+    .em-meta-key { color:#94a3b8; }
+    .em-meta-val { color:#1e293b; }
+    .em-footer { background:#f8fafc; }
+    .em-footer-text { color:#94a3b8; }
+    .em-divider-td { border-top:1px solid #e2e8f0; }
+    @media (prefers-color-scheme: dark) {
+      .em-wrapper { background:#0f172a !important; }
+      .em-card { background:#1e293b !important;color:#f1f5f9 !important; }
+      .em-h1 { color:#f8fafc !important; }
+      .em-body { color:#cbd5e1 !important; }
+      .em-overline { color:#64748b !important; }
+      .em-strong { color:#f1f5f9 !important; }
+      .em-muted { color:#64748b !important; }
+      .em-inner { background:#0f172a !important;border-color:#334155 !important; }
+      .em-meta-key { color:#64748b !important; }
+      .em-meta-val { color:#e2e8f0 !important; }
+      .em-footer { background:#1e293b !important; }
+      .em-footer-text { color:#475569 !important; }
+      .em-divider-td { border-top-color:#334155 !important; }
+    }
+  </style>
+</head>
+<body class="em-wrapper" style="margin:0;padding:0;background:#f1f5f9;">
   ${previewText ? `<span style="display:none;max-height:0;overflow:hidden;">${previewText}</span>` : ''}
-  </head><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" class="em-wrapper" style="background:#f1f5f9;">
     <tr><td align="center" style="padding:40px 16px;">
-      <table width="100%" style="max-width:580px;">
-        <tr><td style="background:linear-gradient(135deg,#1e3a8a,#1d4ed8,#0ea5e9);border-radius:16px 16px 0 0;padding:28px 40px;">
-          <span style="color:#fff;font-size:22px;font-weight:800;">📊 Performance Dashboard</span>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
+
+        <!-- Header -->
+        <tr><td style="background:linear-gradient(135deg,#312e81,#4338ca,#4f46e5);border-radius:16px 16px 0 0;padding:28px 40px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td style="vertical-align:middle;">
+              <span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">📊 Performance Dashboard</span>
+            </td>
+          </tr></table>
         </td></tr>
-        <tr><td style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:40px;">${body}</td></tr>
-        <tr><td style="background:#f1f5f9;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:24px 40px;text-align:center;">
-          <p style="margin:0;color:#94a3b8;font-size:12px;">Você recebeu este email por ter uma conta no Performance Dashboard.</p>
+
+        <!-- Body -->
+        <tr><td class="em-card" style="background:#ffffff;border:1px solid #e2e8f0;border-top:none;padding:40px;">${body}</td></tr>
+
+        <!-- Footer -->
+        <tr><td class="em-footer" style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:24px 40px;text-align:center;">
+          <p class="em-footer-text" style="margin:0 0 4px;color:#94a3b8;font-size:12px;line-height:1.7;">
+            Você recebeu este email por ter uma conta no Performance Dashboard.
+          </p>
+          <p class="em-footer-text" style="margin:0;color:#94a3b8;font-size:12px;line-height:1.7;">
+            Dúvidas? Acesse <a href="${process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app'}" style="color:#64748b;">jmeter-performance-dashboard.vercel.app</a> ou responda este email.
+          </p>
         </td></tr>
+
       </table>
     </td></tr>
-  </table></body></html>`;
+  </table>
+</body>
+</html>`;
 }
 
 export async function sendSubscriptionConfirmationEmail(opts: {
@@ -175,62 +239,61 @@ export async function sendNFSeEmail(opts: {
 }): Promise<void> {
   if (!canSendEmail()) throw new Error('SMTP Zoho não configurado para envio da NFS-e');
 
+  const firstName = opts.userName.split(' ')[0] || 'Cliente';
+  const valor = opts.valorServicos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const codeRow = opts.codigoVerificacao
+    ? `<tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
+       <tr>
+         <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Código de verificação</td>
+         <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:14px;font-family:monospace;font-weight:700;">${opts.codigoVerificacao}</td>
+       </tr>`
+    : '';
+
   const body = `
-    <div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;color:#0f172a">
-      <div style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:32px;border-radius:16px 16px 0 0;text-align:center">
-        <h1 style="color:#fff;font-size:28px;margin:0">NFS-e Emitida</h1>
-        <p style="color:#dbeafe;font-size:14px;margin-top:8px">Sua nota fiscal foi gerada com sucesso</p>
-      </div>
-      <div style="background:#fff;padding:32px;border:1px solid #e2e8f0;border-top:0">
-        <p style="font-size:16px;line-height:1.6;margin:0 0 24px">
-          Olá ${escapeHtml(opts.userName)},
-        </p>
-        <p style="font-size:16px;line-height:1.6;margin:0 0 24px">
-          Sua NFS-e referente ao plano <strong>${escapeHtml(opts.planName)}</strong> (${escapeHtml(opts.mesReferencia)}) foi emitida com sucesso pela Prefeitura de São Paulo.
-        </p>
-        <div style="background:#f1f5f9;padding:20px;border-radius:12px;margin:0 0 24px">
-          <div style="display:grid;gap:12px">
-            <div>
-              <div style="font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Número da NFS-e</div>
-              <div style="font-size:18px;font-weight:700;color:#0f172a;font-family:monospace">${escapeHtml(opts.nfseNumero)}</div>
-            </div>
-            ${opts.codigoVerificacao ? `
-            <div>
-              <div style="font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Código de Verificação</div>
-              <div style="font-size:14px;font-weight:600;color:#0f172a;font-family:monospace">${escapeHtml(opts.codigoVerificacao)}</div>
-            </div>
-            ` : ''}
-            <div>
-              <div style="font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Valor</div>
-              <div style="font-size:18px;font-weight:700;color:#059669">R$ ${opts.valorServicos.toFixed(2).replace('.', ',')}</div>
-            </div>
-          </div>
-        </div>
-        <p style="font-size:16px;line-height:1.6;margin:0 0 24px">
-          Para consultar ou descargar a nota, acesse o portal da Prefeitura:
-        </p>
-        <div style="text-align:center;margin:0 0 24px">
-          <a href="${escapeHtml(opts.verificacaoUrl)}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:700;font-size:15px">
-            Consultar NFS-e →
-          </a>
-        </div>
-        <p style="font-size:14px;line-height:1.6;margin:0;color:#64748b">
-          Esta nota fiscal é válida em todo o território nacional e comprova o pagamento do serviço de análise de performance contratado.
-        </p>
-      </div>
-      <div style="background:#f8fafc;padding:24px;border-radius:0 0 16px 16px;border:1px solid #e2e8f0;border-top:0;text-align:center">
-        <p style="font-size:13px;color:#64748b;margin:0">
-          Dúvidas? Responda este email ou acesse nossa <a href="${escapeHtml(process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app')}/ajuda" style="color:#2563eb">central de ajuda</a>
-        </p>
-      </div>
-    </div>
+    <p class="em-overline" style="margin:0 0 4px;color:#94a3b8;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Nota fiscal de serviço</p>
+    <h1 class="em-h1" style="margin:0 0 16px;color:#0f172a;font-size:28px;font-weight:800;line-height:1.2;">Sua NFS-e foi emitida</h1>
+    <p class="em-body" style="margin:0 0 28px;color:#475569;font-size:15px;line-height:1.8;">
+      Olá, ${firstName}. A nota fiscal referente ao pagamento do plano <strong class="em-strong" style="color:#1e293b;">${opts.planName}</strong>
+      de <strong class="em-strong" style="color:#1e293b;">${opts.mesReferencia}</strong> está disponível para consulta.
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" class="em-inner"
+      style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:28px;">
+      <tr><td style="padding:16px 24px;"><table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Número da NFS-e</td>
+          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:14px;font-family:monospace;font-weight:700;">${opts.nfseNumero}</td>
+        </tr>
+        ${codeRow}
+        <tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
+        <tr>
+          <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Valor</td>
+          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:14px;font-weight:700;">${valor}</td>
+        </tr>
+        <tr><td colspan="2" class="em-meta-sep" style="padding:0;border-top:1px solid #e2e8f0;font-size:0;">&nbsp;</td></tr>
+        <tr>
+          <td class="em-meta-key" style="padding:10px 0;color:#94a3b8;font-size:13px;">Prestador</td>
+          <td class="em-meta-val" style="padding:10px 0 10px 12px;color:#1e293b;font-size:13px;">ANSTECH QUALITY ASSURANCE LTDA<br/>CNPJ: 48.847.227/0001-01</td>
+        </tr>
+      </table></td></tr>
+    </table>
+
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+      <tr><td align="center">${ctaButton('Consultar NFS-e na Prefeitura →', opts.verificacaoUrl)}</td></tr>
+    </table>
+
+    <p class="em-muted" style="margin:0;color:#94a3b8;font-size:12px;line-height:1.7;">
+      Na página da Prefeitura de São Paulo, informe o CNPJ da ANSTECH <strong>48.847.227/0001-01</strong>,
+      o número da nota e o código de verificação apresentados acima.
+    </p>
   `;
 
   await getTransporter().sendMail({
     from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
     to: opts.to,
-    subject: `NFS-e #${opts.nfseNumero} - ${opts.planName} (${opts.mesReferencia})`,
-    html: billingLayout(body, `Sua NFS-e #${opts.nfseNumero} foi emitida.`),
+    subject: `NFS-e nº ${opts.nfseNumero} emitida — Performance Dashboard`,
+    html: billingLayout(body, `Sua NFS-e nº ${opts.nfseNumero} foi emitida e está disponível para consulta.`),
   });
 }
 
