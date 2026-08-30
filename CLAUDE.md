@@ -333,42 +333,76 @@ Publicar `@seu-dominio/perf-analyzer` no npm com a lógica de parsing e análise
 
 ## Roadmap de Implementação
 
-### Fase 1 — Fundação (ATUAL)
-- [x] Arquitetura de parsers multi-framework
-- [x] Parser JMeter (refatorado para usar a arquitetura)
-- [x] Parser K6 JSON
-- [x] Parser Locust CSV
-- [x] Parser Artillery JSON (stub)
-- [x] Parser Newman/Postman (stub)
-- [x] Autenticação (NextAuth + Google OAuth)
-- [x] Middleware de segurança
-- [x] Migração do processamento para API server-side
+### Fase 1 — Fundação (CONCLUÍDA)
+- [x] Arquitetura de parsers multi-framework: JMeter, K6 (JSON/CSV/Summary), Locust, Artillery, Newman, Gatling, Vegeta — em `src/lib/parsers/`
+- [x] Autenticação (Better Auth + Google OAuth) e middleware de segurança
+- [x] Ingestão server-side com persistência em Neon (`analysis_run`, `analysis_label`, `analysis_time_bucket`, `analysis_error`, `comparison`)
+- [x] Grade de planos: Gráfico (R$ 49, 50 análises/mês) e Panorama (R$ 149, 250 análises/mês) — `src/lib/plans.ts`
+- [x] Stripe Checkout + webhook idempotente + pro-rata de upgrade + downgrade com schedule
+- [x] Emissão de NFS-e em produção (`src/lib/nfse.ts`) + reconcile via crons (`nfse-reconcile` às 00h Brasília, `trial-check`)
+- [x] Painel `/admin` Super Admin (billing, NFS-e, broadcast, MRR, usuários, suspensão)
+- [x] `/pricing` público com checkout dinâmico
+- [x] Paywall/cotas no backend (HTTP 402 ao atingir limite mensal) + `UsageBar` no frontend
+- [x] Notificações com vencimento, e-mails transacionais (Zoho SMTP) e tabelas de banco
 - [x] CLAUDE.md (este arquivo)
 
-### Fase 2 — Escalabilidade (próxima)
-- [ ] Upload direto para Supabase Storage (arquivos grandes)
+### Fase 2 — Escalabilidade (parcial)
+- [ ] Upload direto para Supabase Storage (arquivos grandes >100MB)
 - [ ] Processamento server-side com Worker Thread
 - [ ] Progresso em tempo real via SSE
-- [ ] Persistência de análises no banco de dados
 - [ ] Rate limiting (Upstash Redis)
-- [ ] Completar parsers Artillery e Newman
-- [ ] Parser Gatling (simulation.log)
-- [ ] Parser Vegeta (JSON)
+- [ ] Validar/completar parsers Artillery e Newman (hoje básicos/stubs)
 
-### Fase 3 — Comercialização
-- [ ] Planos + billing (Stripe)
-- [ ] Export PDF/PNG
-- [ ] Comparação de execuções (histórico)
+### Fase 3 — Comercialização (parcial)
+- [x] Planos + billing (Stripe): checkout, webhook idempotente, pro-rata, upgrade/downgrade
+- [x] Comparação de execuções (histórico) — tabela `comparison` + baseline (plano Panorama)
+- [ ] Export PDF/PNG (ver fila do catadão — P2)
 - [ ] API pública com API Keys
 - [ ] Landing page
 - [ ] Documentação pública da API
 
 ### Fase 4 — Expansão
-- [ ] LLM analysis (apenas sobre aggregateReport)
+- [ ] LLM analysis (apenas sobre aggregateReport; diretrizes na seção "Integração de LLM")
 - [ ] Alertas e SLAs
 - [ ] Widget embeddable
 - [ ] npm package
 - [ ] On-premise / self-hosted (Enterprise)
+
+---
+
+## Fila de Tarefas — "Catadão" de Ajustes (próximas melhorias)
+
+Priorizada em 30/08 após auditoria contra a grade oficial de planos e o roteiro de desenvolvimento.
+
+### P1 — Dashboard estilo Grafana (tarefas 1 + 9 + 12 da grade oficial)
+- [x] **Legendas e cores dos gráficos por tema** (claro/escuro): Legend do Recharts com cor por tema; remover legendas pretas que "somem" no escuro (tarefa 9) — hook `useChartTheme` + `ThemedLegend` em `src/components/app/charts/ChartKit.tsx`, aplicados a todos os gráficos do dashboard
+- [x] **Novos gráficos** (tarefas 1 + 12) — seção "Visão analítica" no `PerformanceDashboard`; dados derivados por funções puras em `src/components/app/charts/chartHelpers.ts` (testes em `__tests__/lib/chartHelpers.test.ts`, 100% de cobertura):
+  - [x] Gauges de status (RPS, latência, capacidade) — `GaugeRow`
+  - [x] Dispersão VUs × latência (degradação por concorrência) — `VusLatencyScatter`
+  - [x] Erros por código HTTP (pie/bar) — `HttpErrorsPie` (top 6 + Outros)
+  - [x] Taxa de erro % por endpoint — `ErrorRateBars`
+  - [x] Throughput de rede (bytes/s enviados e recebidos) — `NetworkThroughputChart`
+  - [x] Boxplot/distribuição de tempos de resposta (média vs mediana vs p90/p95/p99) — `PercentilesChart`
+  - [x] Comparativo baseline × run atual (evolução %) — `BaselineComparisonChart`
+- [x] **Percentil P99** no dashboard — pipeline completa: tipos (`MetricStats.p99`, `AggregateReportItem.p99/p99Latency`) → ingest (`percentile(...,0.99)` em aggregate/time series/phaseStats) → schema → migração `migrations/013_add_p99_percentile.sql` (aplicada: colunas `p99`/`p99_latency` em `analysis_label`) → INSERT/SELECT em `runs/route.ts`/`run-data.ts` → exibição nas tabelas (AnalysisWorkspace, `/resultados/[id]`) e over-time (`OVER_TIME_SERIES` com P99)
+
+### P1.x — Achados do QA (pré-existentes, fora do escopo do P1)
+- **Hydration mismatch no `<head>` (React error #418)**: o `<script>` inline de tema em `src/app/layout.tsx` falha hidratação em toda página (dev e produção), quebrando o Cypress e logando erro no console do usuário. Pré-existente (baseline `git stash` = 12 falhas; com o P1 = 11, nenhuma regressão). Correção proposta: trocar por `<Script strategy="beforeInteractive">` do `next/script` ou renderizar no `<body>`.
+
+### P2 — Exportação executiva (tarefas 2 + 10 + 11)
+- [ ] Motor de exportação: relatório executivo em PDF/PNG com gráficos embutidos
+- [ ] Export direto no Histórico de execuções
+- [ ] Liberação por plano (`exportPDF`/`exportPNG` em `src/lib/plans.ts`), provando as travas de cota
+
+### P3 — Suporte e conformidade legal (tarefas 14 + 3)
+- [ ] Modal de suporte unificado (bug/elogio/sugestão/dúvida) → `suporte@anstech.com.br`, padrão EstilOS (backend + frontend)
+- [ ] Completar `/termos` e `/privacidade`: contato `suporte@anstech.com.br`, LGPD, cancelamento e NFS-e
+
+### P4 — Qualidade, testes e infra (tarefa 13 + housekeeping)
+- [ ] Expandir Cypress headless: limites de geração (50/250 → 402), upgrade com pro-rata, exportação, NFS-e
+- [ ] Refinar template de e-mail claro/escuro (pendência registrada pelo autor)
+- [ ] Limpar warnings de `exhaustive-deps` em `AdminClient.tsx`
+- [ ] Infra: apontar domínio final `jmeterperformancedashboard.anstech.com.br` (hoje `BETTER_AUTH_URL`/`APP_URL` usam o subdomínio da Vercel)
 
 ---
 

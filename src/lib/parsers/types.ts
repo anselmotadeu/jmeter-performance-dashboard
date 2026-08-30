@@ -38,6 +38,7 @@ export type MetricStats = {
   median: number | null;
   p90: number | null;
   p95: number | null;
+  p99: number | null;
   min: number | null;
   max: number | null;
   count: number;
@@ -63,6 +64,7 @@ export type AggregateReportItem = {
   median: number | null;
   p90: number | null;
   p95: number | null;
+  p99: number | null;
   min: number | null;
   max: number | null;
   errorRate: number;
@@ -72,6 +74,7 @@ export type AggregateReportItem = {
   medianLatency: number | null;
   p90Latency: number | null;
   p95Latency: number | null;
+  p99Latency: number | null;
   bytes: number | null;
   sentBytes: number | null;
 };

@@ -20,10 +20,10 @@ describe("certified parsers", () => {
     expect(result.endTimestamp).toBe(1760000001600);
     expect(
       result.aggregateReport.find((item) => item.label === "Login"),
-    ).toMatchObject({ count: 3, average: 110, p95: 120 });
+    ).toMatchObject({ count: 3, average: 110, p95: 120, p99: 120 });
     expect(
       result.aggregateReport.find((item) => item.label === "Checkout"),
-    ).toMatchObject({ count: 3, errorRate: 33.33 });
+    ).toMatchObject({ count: 3, errorRate: 33.33, p99: 400 });
   });
 
   it("does not collapse K6 CSV requests in the same second", () => {
@@ -50,6 +50,7 @@ describe("certified parsers", () => {
     expect(result.errorCount).toBe(1);
     expect(result.aggregateReport[0].bytes).toBeNull();
     expect(result.aggregateReport[0].averageLatency).toBe(115);
+    expect(result.aggregateReport[0].p99).toBe(210);
     expect(result.durationMs).toBe(210);
   });
 
@@ -175,6 +176,15 @@ describe("certified parsers", () => {
     );
     expect(result.aggregateReport[0].p90).toBeNull();
     expect(result.aggregateReport[0].p95).toBeNull();
+    expect(result.aggregateReport[0].p99).toBeNull();
     expect(result.diagnostics.join(" ")).toMatch(/P90.*P95/);
+  });
+
+  it("keeps P99 metric per second on the time series for streamable sources", () => {
+    const result = parseAndAnalyze(fixture("k6-sample-full.ndjson"));
+    const durationRows = result.timeSeriesData.filter((entry) => entry.durationP99 !== undefined);
+    expect(durationRows.length).toBeGreaterThan(0);
+    const phaseDuration = result.phaseStats.find((item) => item.metric === "duration");
+    expect(phaseDuration?.p99).toBeGreaterThanOrEqual(phaseDuration?.p95 ?? Infinity);
   });
 });

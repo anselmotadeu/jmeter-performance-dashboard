@@ -164,8 +164,8 @@ export async function POST(request: Request) {
 
     if (safeAggregates.length) {
       await client.query(
-        `INSERT INTO analysis_label (run_id,label,request_count,average,median,p90,p95,min,max,error_rate,throughput,average_latency,p95_latency,average_bytes,average_sent_bytes)
-         SELECT $1,* FROM unnest($2::text[],$3::bigint[],$4::numeric[],$5::numeric[],$6::numeric[],$7::numeric[],$8::numeric[],$9::numeric[],$10::numeric[],$11::numeric[],$12::numeric[],$13::numeric[],$14::numeric[],$15::numeric[])`,
+        `INSERT INTO analysis_label (run_id,label,request_count,average,median,p90,p95,p99,min,max,error_rate,throughput,average_latency,p95_latency,p99_latency,average_bytes,average_sent_bytes)
+         SELECT $1,* FROM unnest($2::text[],$3::bigint[],$4::numeric[],$5::numeric[],$6::numeric[],$7::numeric[],$8::numeric[],$9::numeric[],$10::numeric[],$11::numeric[],$12::numeric[],$13::numeric[],$14::numeric[],$15::numeric[],$16::numeric[],$17::numeric[],$18::numeric[])`,
         [
           runId,
           safeAggregates.map((item) => item.label),
@@ -174,12 +174,14 @@ export async function POST(request: Request) {
           safeAggregates.map((item) => item.median),
           safeAggregates.map((item) => item.p90),
           safeAggregates.map((item) => item.p95),
+          safeAggregates.map((item) => item.p99),
           safeAggregates.map((item) => item.min),
           safeAggregates.map((item) => item.max),
           safeAggregates.map((item) => item.errorRate),
           safeAggregates.map((item) => item.throughput),
           safeAggregates.map((item) => item.averageLatency),
           safeAggregates.map((item) => item.p95Latency),
+          safeAggregates.map((item) => item.p99Latency),
           safeAggregates.map((item) => item.bytes),
           safeAggregates.map((item) => item.sentBytes),
         ],

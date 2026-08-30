@@ -39,6 +39,8 @@ export default async function RunDetailPage({
         durationMs: (snapshot as Record<string, unknown>).durationMs as number,
         successCount: (snapshot as Record<string, unknown>).successCount as number,
         errorCount: (snapshot as Record<string, unknown>).errorCount as number,
+        errorDetails: errors,
+        comparisonChanges: comparison?.summary.changes ?? [],
       }
     : null;
 
@@ -141,6 +143,7 @@ export default async function RunDetailPage({
                 <th className="p-3">Média</th>
                 <th className="p-3">P90</th>
                 <th className="p-3">P95</th>
+                <th className="p-3">P99</th>
                 <th className="p-3">Erro</th>
                 <th className="p-3">Req/s</th>
               </tr>
@@ -153,6 +156,7 @@ export default async function RunDetailPage({
                   <td className="p-3">{item.average} ms</td>
                   <td className="p-3">{item.p90 === null ? "N/D" : `${item.p90} ms`}</td>
                   <td className="p-3">{item.p95 === null ? "N/D" : `${item.p95} ms`}</td>
+                  <td className="p-3">{item.p99 === null ? "N/D" : `${item.p99} ms`}</td>
                   <td className="p-3">{item.errorRate}%</td>
                   <td className="p-3">{item.throughput}</td>
                 </tr>

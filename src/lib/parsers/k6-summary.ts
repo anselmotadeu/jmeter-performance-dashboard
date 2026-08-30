@@ -36,6 +36,7 @@ function makeResult(input: {
   const max = input.duration.max ?? null;
   const p90 = input.duration['p(90)'] ?? input.duration.p90 ?? null;
   const p95 = input.duration['p(95)'] ?? input.duration.p95 ?? null;
+  const p99 = input.duration['p(99)'] ?? input.duration.p99 ?? null;
 
   return {
     schemaVersion: 2,
@@ -51,6 +52,7 @@ function makeResult(input: {
       'Summary agregado: gráficos temporais e ramp-up não estão disponíveis.',
       ...(p90===null ? ['P90 não foi exportado pelo k6 e será exibido como indisponível.'] : []),
       ...(p95===null ? ['P95 não foi exportado pelo k6 e será exibido como indisponível.'] : []),
+      ...(p99===null ? ['P99 não foi exportado pelo k6 e será exibido como indisponível.'] : []),
     ],
     successCount: Math.max(0, input.count - input.errors),
     errorCount: input.errors,
@@ -61,11 +63,11 @@ function makeResult(input: {
     durationMs: input.durationMs,
     rampUpInfo: { users: 0, usersPerTest: 0, duration: '0s' },
     aggregateReport: [{
-      label: 'Geral', average, median: input.duration.med ?? average, p90, p95, min, max,
+      label: 'Geral', average, median: input.duration.med ?? average, p90, p95, p99, min, max,
       errorRate: input.count ? Number(((input.errors / input.count) * 100).toFixed(2)) : 0,
       throughput: input.durationMs ? Number((input.count / (input.durationMs / 1000)).toFixed(2)) : 0,
       count: input.count, averageLatency: null, medianLatency: null, p90Latency: null,
-      p95Latency: null, bytes: null, sentBytes: null,
+      p95Latency: null, p99Latency: null, bytes: null, sentBytes: null,
     }],
     timeSeriesData: [],
     heatmaps: [],

@@ -343,6 +343,7 @@ export default function AnalysisWorkspace() {
                     <th className="p-3">Média</th>
                     <th className="p-3">P90</th>
                     <th className="p-3">P95</th>
+                    <th className="p-3">P99</th>
                     <th className="p-3">Erro</th>
                     <th className="p-3">Req/s</th>
                   </tr>
@@ -358,6 +359,7 @@ export default function AnalysisWorkspace() {
                       <td className="p-3">{item.average} ms</td>
                       <td className="p-3">{item.p90 === null ? "N/D" : `${item.p90} ms`}</td>
                       <td className="p-3">{item.p95 === null ? "N/D" : `${item.p95} ms`}</td>
+                      <td className="p-3">{item.p99 === null ? "N/D" : `${item.p99} ms`}</td>
                       <td className="p-3">{item.errorRate}%</td>
                       <td className="p-3">{item.throughput}</td>
                     </tr>

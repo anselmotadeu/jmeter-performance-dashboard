@@ -16,12 +16,35 @@ import {
 import type {
   AggregateReportItem,
   AnalysisCapabilities,
+  ErrorDetail,
   Heatmap,
   HttpPhase,
   MetricStats,
   TimeSeriesEntry,
 } from "@/lib/parsers";
 import { analyzeTest, type AnalysisSummary, type Insight } from "@/lib/analysis";
+import {
+  BaselineComparisonChart,
+  Card,
+  ErrorRateBars,
+  GaugeRow,
+  HttpErrorsPie,
+  NetworkThroughputChart,
+  PercentilesChart,
+  THEME_TOOLTIP,
+  ThemedLegend,
+  VusLatencyScatter,
+  useChartTheme,
+  type BaselineChange,
+} from "./charts/ChartKit";
+import {
+  buildPercentileRows,
+  buildVusLatencyScatter,
+  computeGaugeMetrics,
+  computeNetworkThroughput,
+  estimateBucketSeconds,
+  sliceErrorByCode,
+} from "./charts/chartHelpers";
 
 export type DashboardData = {
   capabilities: Partial<AnalysisCapabilities>;
@@ -35,6 +58,8 @@ export type DashboardData = {
   durationMs?: number;
   successCount?: number;
   errorCount?: number;
+  errorDetails?: ErrorDetail[];
+  comparisonChanges?: BaselineChange[];
 };
 
 const PHASE_ORDER: HttpPhase[] = ["duration", "blocked", "connecting", "receiving", "sending", "waiting"];
@@ -52,6 +77,7 @@ const OVER_TIME_SERIES = [
   { key: "Min", name: "min", color: "#94a3b8" },
   { key: "P90", name: "p90", color: "#f59e0b" },
   { key: "P95", name: "p95", color: "#3b82f6" },
+  { key: "P99", name: "p99", color: "#8b5cf6" },
   { key: "Max", name: "max", color: "#22c55e" },
 ];
 
@@ -103,12 +129,26 @@ function severityLabel(severity: string): string {
 }
 
 export default function PerformanceDashboard({ data }: { data: DashboardData }) {
-  const { timeSeriesData, heatmaps, phaseStats, aggregateReport, capabilities, labels, startTime, endTime, durationMs, successCount, errorCount } = data;
+  const { timeSeriesData, heatmaps, phaseStats, aggregateReport, capabilities, labels, startTime, endTime, durationMs, successCount, errorCount, errorDetails, comparisonChanges } = data;
+  const theme = useChartTheme();
+  const themeTooltip = THEME_TOOLTIP(theme);
   const hasTime = Boolean(capabilities.timeSeries && timeSeriesData.length > 0);
   const hasVus = hasTime && timeSeriesData.some((item) => Number(item.vus) > 0);
   const hasRps = hasTime && timeSeriesData.some((item) => Number(item.rps) > 0);
   const hasErrors = hasTime && timeSeriesData.some((item) => Number(item.errs) > 0);
   const hasChecks = hasTime && timeSeriesData.some((item) => Number(item.checks) > 0 || Number(item.checksFailed) > 0);
+  const hasNetwork =
+    hasTime &&
+    labels.some((label) => timeSeriesData.some((item) => item[`bytes_${label}`] !== undefined || item[`sentBytes_${label}`] !== undefined));
+  const hasErrorCodes = (errorDetails ?? []).length > 0;
+  const hasComparison = (comparisonChanges ?? []).length > 0;
+
+  const gauge = computeGaugeMetrics({ timeSeriesData, aggregateReport, durationMs, successCount, errorCount });
+  const scatterPoints = buildVusLatencyScatter(timeSeriesData);
+  const hasScatter = scatterPoints.some((point) => point.latency > 0);
+  const errorSlices = sliceErrorByCode(errorDetails ?? []);
+  const networkPoints = computeNetworkThroughput(timeSeriesData, labels, estimateBucketSeconds(timeSeriesData));
+  const percentileRows = buildPercentileRows(aggregateReport);
 
   const phaseStatsMap = new Map(phaseStats.map((phase) => [phase.metric, phase]));
   const heatmapMap = new Map(heatmaps.map((heatmap) => [heatmap.metric, heatmap]));
@@ -193,10 +233,10 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
                   <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" tickFormatter={formatAxisLabel} />
-              <YAxis />
-              <Tooltip formatter={(value) => formatNumber(Number(value))} labelFormatter={formatAxisLabel} />
+              <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
+              <XAxis dataKey="time" tickFormatter={formatAxisLabel} tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+              <YAxis tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+              <Tooltip formatter={(value) => formatNumber(Number(value))} labelFormatter={formatAxisLabel} {...themeTooltip} />
               <Area type="monotone" dataKey="vus" name="VUs" stroke="#4f46e5" fill="url(#vusGradient)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
@@ -227,11 +267,11 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
           <h3 className="mb-4 text-lg font-black">Tempo médio por endpoint</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={aggregateReport}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
               <XAxis dataKey="label" hide />
-              <YAxis tickFormatter={(value) => formatMs(value)} />
-              <Tooltip formatter={(value) => formatMs(Number(value))} />
-              <Legend />
+              <YAxis tickFormatter={(value) => formatMs(value)} tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+              <Tooltip formatter={(value) => formatMs(Number(value))} {...themeTooltip} />
+              <Legend content={<ThemedLegend theme={theme} />} />
               <Bar dataKey="average" name="Média (ms)" fill="#4f46e5" radius={[6, 6, 0, 0]} />
               <Bar dataKey="p95" name="P95 (ms)" fill="#06b6d4" radius={[6, 6, 0, 0]} />
             </BarChart>
@@ -241,11 +281,11 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
               <h3 className="mb-4 text-lg font-black">Evolução do tempo de resposta por endpoint</h3>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={timeSeriesData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" tickFormatter={formatAxisLabel} />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
+                  <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
+                  <XAxis dataKey="time" tickFormatter={formatAxisLabel} tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+                  <YAxis tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+                  <Tooltip {...themeTooltip} />
+                  <Legend content={<ThemedLegend theme={theme} />} />
                   {labels.slice(0, 8).map((label, index) => (
                     <Line
                       key={label}
@@ -262,6 +302,51 @@ export default function PerformanceDashboard({ data }: { data: DashboardData }) 
             </div>
           )}
         </section>
+      )}
+
+      {(hasTime || percentileRows.length > 0 || hasComparison) && (
+        <div className="space-y-6">
+          <h2 className="text-xl font-black">Visão analítica</h2>
+          <GaugeRow gauge={gauge} />
+
+          <div className="grid gap-6 xl:grid-cols-2">
+            {hasScatter && (
+              <Card title="Concorrência vs latência" subtitle="Relação entre usuários ativos e tempo médio de resposta">
+                <VusLatencyScatter points={scatterPoints} theme={theme} />
+              </Card>
+            )}
+            {hasErrorCodes && (
+              <Card title="Erros por código HTTP" subtitle="Distribuição das falhas registradas">
+                <HttpErrorsPie slices={errorSlices} theme={theme} />
+              </Card>
+            )}
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-2">
+            {aggregateReport.some((item) => item.errorRate > 0) && (
+              <Card title="Taxa de erro por endpoint" subtitle="Percentual de falhas por fluxo">
+                <ErrorRateBars rows={aggregateReport} theme={theme} />
+              </Card>
+            )}
+            {hasNetwork && (
+              <Card title="Throughput de rede" subtitle="Bytes trafegados por segundo (recebido/enviado)">
+                <NetworkThroughputChart points={networkPoints} theme={theme} />
+              </Card>
+            )}
+          </div>
+
+          {percentileRows.length > 0 && (
+            <Card title="Distribuição dos tempos de resposta" subtitle="Média, mediana e percentis por endpoint">
+              <PercentilesChart rows={percentileRows} theme={theme} />
+            </Card>
+          )}
+
+          {hasComparison && (
+            <Card title="Comparativo com a baseline" subtitle="Variação percentual em relação à execução de referência">
+              <BaselineComparisonChart changes={comparisonChanges ?? []} />
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );
@@ -385,14 +470,16 @@ function MetricRow({
 }
 
 function ResponseTimeOverTime({ data, phase }: { data: TimeSeriesEntry[]; phase: HttpPhase }) {
+  const theme = useChartTheme();
+  const themeTooltip = THEME_TOOLTIP(theme);
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="time" tickFormatter={formatAxisLabel} />
-        <YAxis tickFormatter={(value) => formatMs(value)} />
-        <Tooltip formatter={(value) => formatMs(Number(value))} labelFormatter={formatAxisLabel} />
-        <Legend />
+        <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
+        <XAxis dataKey="time" tickFormatter={formatAxisLabel} tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+        <YAxis tickFormatter={(value) => formatMs(value)} tick={{ fill: theme.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: theme.grid }} />
+        <Tooltip formatter={(value) => formatMs(Number(value))} labelFormatter={formatAxisLabel} {...themeTooltip} />
+        <Legend content={<ThemedLegend theme={theme} />} />
         {OVER_TIME_SERIES.map((series) => (
           <Line
             key={series.key}
@@ -411,6 +498,7 @@ function ResponseTimeOverTime({ data, phase }: { data: TimeSeriesEntry[]; phase:
 
 function TimeSeriesArea({ data, dataKey, color, name }: { data: TimeSeriesEntry[]; dataKey: string; color: string; name: string }) {
   const gradientId = `grad-${dataKey}`;
+  const theme = useChartTheme();
   return (
     <ResponsiveContainer width="100%" height={120}>
       <AreaChart data={data}>
@@ -422,7 +510,7 @@ function TimeSeriesArea({ data, dataKey, color, name }: { data: TimeSeriesEntry[
         </defs>
         <XAxis dataKey="time" hide />
         <YAxis hide />
-        <Tooltip formatter={(value) => formatNumber(Number(value))} labelFormatter={formatAxisLabel} />
+        <Tooltip formatter={(value) => formatNumber(Number(value))} labelFormatter={formatAxisLabel} {...THEME_TOOLTIP(theme)} />
         <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} />
       </AreaChart>
     </ResponsiveContainer>

@@ -23,6 +23,7 @@ export type StoredLabel = {
   median: number;
   p90: number | null;
   p95: number | null;
+  p99: number | null;
   min: number | null;
   max: number | null;
   errorRate: number;
@@ -144,7 +145,7 @@ export async function getRunDetail(userId: string, runId: string) {
   if (!run.rows[0]) return null;
   const [labels, errors, checks, thresholds, comparison] = await Promise.all([
     db.query<StoredLabel>(
-      `SELECT label,request_count::float8 AS "count",average::float8,median::float8,p90::float8,p95::float8,min::float8,max::float8,error_rate::float8 AS "errorRate",throughput::float8,average_latency::float8 AS "averageLatency",p95_latency::float8 AS "p95Latency" FROM analysis_label WHERE run_id=$1 ORDER BY average DESC`,
+      `SELECT label,request_count::float8 AS "count",average::float8,median::float8,p90::float8,p95::float8,p99::float8,min::float8,max::float8,error_rate::float8 AS "errorRate",throughput::float8,average_latency::float8 AS "averageLatency",p95_latency::float8 AS "p95Latency" FROM analysis_label WHERE run_id=$1 ORDER BY average DESC`,
       [runId],
     ),
     db.query<StoredError>(

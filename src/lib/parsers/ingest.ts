@@ -297,6 +297,7 @@ export function createAnalysisAccumulator(
         median: Number(median(responseSorted).toFixed(2)),
         p90: Number(percentile(responseSorted, 0.9).toFixed(2)),
         p95: Number(percentile(responseSorted, 0.95).toFixed(2)),
+        p99: Number(percentile(responseSorted, 0.99).toFixed(2)),
         min: Number(group.min.toFixed(2)), max: Number(group.max.toFixed(2)),
         errorRate: Number(((group.errors / group.count) * 100).toFixed(2)),
         throughput: Number((group.count / activeSeconds).toFixed(2)),
@@ -305,6 +306,7 @@ export function createAnalysisAccumulator(
         medianLatency: group.latencyCount ? Number(median(latencySorted).toFixed(2)) : null,
         p90Latency: group.latencyCount ? Number(percentile(latencySorted, 0.9).toFixed(2)) : null,
         p95Latency: group.latencyCount ? Number(percentile(latencySorted, 0.95).toFixed(2)) : null,
+        p99Latency: group.latencyCount ? Number(percentile(latencySorted, 0.99).toFixed(2)) : null,
         bytes: group.bytesCount ? Number((group.totalBytes / group.bytesCount).toFixed(2)) : null,
         sentBytes: group.sentBytesCount ? Number((group.totalSentBytes / group.sentBytesCount).toFixed(2)) : null,
       };
@@ -406,6 +408,7 @@ export function createAnalysisAccumulator(
             entry[`${phase}Max`] = samples[samples.length - 1];
             entry[`${phase}P90`] = percentile(samples, 0.9);
             entry[`${phase}P95`] = percentile(samples, 0.95);
+            entry[`${phase}P99`] = percentile(samples, 0.99);
           }
         }
       }
@@ -455,7 +458,7 @@ export function createAnalysisAccumulator(
 
     const phaseStats: MetricStats[] = HTTP_PHASES.map((phase) => {
       const sorted = sortUnique(phaseSamples[phase] ?? []);
-      if (!sorted.length) return { metric: phase, label: PHASE_LABELS[phase], mean: null, median: null, p90: null, p95: null, min: null, max: null, count: 0 };
+      if (!sorted.length) return { metric: phase, label: PHASE_LABELS[phase], mean: null, median: null, p90: null, p95: null, p99: null, min: null, max: null, count: 0 };
       return {
         metric: phase,
         label: PHASE_LABELS[phase],
@@ -463,6 +466,7 @@ export function createAnalysisAccumulator(
         median: median(sorted),
         p90: percentile(sorted, 0.9),
         p95: percentile(sorted, 0.95),
+        p99: percentile(sorted, 0.99),
         min: sorted[0],
         max: sorted[sorted.length - 1],
         count: phaseTotals[phase]!.n,

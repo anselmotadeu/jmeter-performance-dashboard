@@ -26,6 +26,7 @@ const phaseStat = z.object({
   median: z.number().finite().nullable(),
   p90: z.number().finite().nullable(),
   p95: z.number().finite().nullable(),
+  p99: z.number().finite().nullable(),
   min: z.number().finite().nullable(),
   max: z.number().finite().nullable(),
   count: z.number().int().nonnegative(),
@@ -36,6 +37,7 @@ const aggregate = z.object({
   median: optionalMetric,
   p90: optionalMetric,
   p95: optionalMetric,
+  p99: optionalMetric,
   min: optionalMetric,
   max: optionalMetric,
   errorRate: z.number().min(0).max(100),
@@ -45,6 +47,7 @@ const aggregate = z.object({
   medianLatency: optionalMetric,
   p90Latency: optionalMetric,
   p95Latency: optionalMetric,
+  p99Latency: optionalMetric,
   bytes: optionalMetric,
   sentBytes: optionalMetric,
 });
