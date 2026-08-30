@@ -25,6 +25,7 @@ export async function GET() {
       p.slug  AS plan_slug,
       s.status,
       s.current_period_end,
+      s.stripe_customer_id,
       (
         SELECT COUNT(*)
         FROM analysis_usage au
@@ -32,7 +33,10 @@ export async function GET() {
           AND au.processed_at >= date_trunc('month', NOW())
       ) AS usage_this_month
     FROM "user" u
-    LEFT JOIN subscription s ON s.user_id = u.id
+    LEFT JOIN LATERAL (
+      SELECT * FROM subscription candidate
+      WHERE candidate.user_id = u.id ORDER BY candidate.created_at DESC LIMIT 1
+    ) s ON true
     LEFT JOIN plan p ON p.id = s.plan_id
     ORDER BY u."createdAt" DESC
     LIMIT 100

@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth';
 import { stripe } from '@/lib/stripe';
 import { PLANS, type PlanSlug } from '@/lib/plans';
-import { getActiveSubscription, getStripeCustomerId } from '@/lib/subscription';
+import { getActiveSubscription, getRecoverableStripeSubscription, getStripeCustomerId } from '@/lib/subscription';
 
 const APP_URL = process.env.BETTER_AUTH_URL ?? 'https://jmeter-performance-dashboard.vercel.app';
 
@@ -35,6 +35,14 @@ export async function POST(request: Request) {
   if (existing && existing.status === 'active') {
     return Response.json({ error: 'Você já possui uma assinatura ativa.' }, { status: 400 });
   }
+  const recoverable = await getRecoverableStripeSubscription(session.user.id);
+  if (recoverable?.stripeCustomerId) {
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: recoverable.stripeCustomerId,
+      return_url: `${APP_URL}/minha-conta`,
+    });
+    return Response.json({ url: portal.url, portal: true });
+  }
 
   try {
     // Buscar Stripe Customer ID existente (se o usuário já fez checkout antes)
@@ -51,9 +59,11 @@ export async function POST(request: Request) {
         label: { type: 'custom', custom: 'CPF ou CNPJ' },
         type: 'text',
         optional: false,
+        text: { minimum_length: 11, maximum_length: 18 },
       }],
       line_items: [{ price: plan.stripePriceId, quantity: 1 }],
       metadata: { userId: session.user.id, planSlug },
+      subscription_data: { metadata: { userId: session.user.id, planSlug } },
       success_url: `${APP_URL}/minha-conta?checkout=success`,
       cancel_url: `${APP_URL}/pricing`,
       locale: 'pt-BR',
@@ -68,7 +78,9 @@ export async function POST(request: Request) {
       checkoutParams.customer_email = session.user.email;
     }
 
-    const checkout = await stripe.checkout.sessions.create(checkoutParams);
+    const checkout = await stripe.checkout.sessions.create(checkoutParams, {
+      idempotencyKey: `subscription_checkout:${session.user.id}:${planSlug}:${Math.floor(Date.now() / 900_000)}`,
+    });
     return Response.json({ url: checkout.url });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

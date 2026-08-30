@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import { Shield, Users, TrendingUp, TrendingDown, DollarSign, RefreshCw, Send, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Shield, Users, TrendingDown, DollarSign, RefreshCw, Send, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -20,6 +20,7 @@ type UserRow = {
   status: string | null;
   current_period_end: string | null;
   usage_this_month: number;
+  stripe_customer_id: string | null;
 };
 
 type NFSeRow = {
@@ -89,6 +90,7 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
   const [mrr, setMRR] = useState<MRR>(initialMRR);
   const [banner, setBanner] = useState<{ type: BannerType; message: string } | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<NFSeRow | null>(null);
 
   // Broadcast form state
   const [broadcastPlan, setBroadcastPlan] = useState<'all' | 'grafico' | 'panorama'>('all');
@@ -96,44 +98,6 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
   const [broadcastMessage, setBroadcastMessage] = useState('');
 
   const showBanner = (type: BannerType, message: string) => setBanner({ type, message });
-
-  // ─── Ações de usuário ──────────────────────────────────────────────────
-
-  async function forcePlan(userId: string, planSlug: 'grafico' | 'panorama') {
-    setLoading(`plan-${userId}-${planSlug}`);
-    try {
-      const res = await fetch('/api/admin/force-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, planSlug }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro desconhecido');
-      showBanner('success', `Plano ${planSlug} aplicado com sucesso.`);
-      await refreshUsers();
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'Erro ao forçar plano');
-    } finally {
-      setLoading(null);
-    }
-  }
-
-  async function suspendUser(userId: string, email: string) {
-    setLoading(`suspend-${userId}`);
-    try {
-      const res = await fetch('/api/admin/suspend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro desconhecido');
-      showBanner('success', `Usuário ${email} suspenso.`);
-      await refreshUsers();
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'Erro ao suspender');
-    } finally {
-      setLoading(null);
-    }
-  }
 
   async function refreshUsers() {
     const res = await fetch('/api/admin/users');
@@ -163,8 +127,8 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
     }
   }
 
-  async function resendNFSe(stripeInvoiceId: string) {
-    setLoading(`nfse-resend-${stripeInvoiceId}`);
+  async function reconcileNFSe(stripeInvoiceId: string) {
+    setLoading(`nfse-reconcile-${stripeInvoiceId}`);
     try {
       const res = await fetch('/api/admin/nfse/resend', {
         method: 'POST',
@@ -172,11 +136,11 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
         body: JSON.stringify({ stripeInvoiceId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Erro ao re-emitir');
+      if (!res.ok) throw new Error(data.error ?? 'Erro ao reconciliar pagamento');
       showBanner('success', data.message ?? 'Reconciliação concluída.');
       await refreshNFSe();
     } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'Erro ao re-emitir NFS-e');
+      showBanner('error', err instanceof Error ? err.message : 'Erro ao reconciliar pagamento');
     } finally {
       setLoading(null);
     }
@@ -308,27 +272,16 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1.5 flex-wrap">
-                      <button
-                        onClick={() => forcePlan(u.id, 'grafico')}
-                        disabled={loading === `plan-${u.id}-grafico`}
-                        className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        {loading === `plan-${u.id}-grafico` ? '…' : 'Forçar Gráfico'}
-                      </button>
-                      <button
-                        onClick={() => forcePlan(u.id, 'panorama')}
-                        disabled={loading === `plan-${u.id}-panorama`}
-                        className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"
-                      >
-                        {loading === `plan-${u.id}-panorama` ? '…' : 'Forçar Panorama'}
-                      </button>
-                      <button
-                        onClick={() => suspendUser(u.id, u.email)}
-                        disabled={loading === `suspend-${u.id}`}
-                        className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
-                      >
-                        {loading === `suspend-${u.id}` ? '…' : 'Suspender'}
-                      </button>
+                       {u.stripe_customer_id ? (
+                         <a
+                           href={`https://dashboard.stripe.com/customers/${encodeURIComponent(u.stripe_customer_id)}`}
+                           target="_blank"
+                           rel="noreferrer"
+                           className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-indigo-700"
+                         >
+                           Ver no Stripe
+                         </a>
+                       ) : <span className="text-xs text-slate-400">Sem cliente Stripe</span>}
                     </div>
                   </td>
                 </tr>
@@ -345,28 +298,8 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
 
       {/* Seção NFS-e */}
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-800 flex items-center justify-between gap-4">
+        <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-800">
           <h2 className="text-lg font-bold">NFS-e — Últimas emissões</h2>
-          <button
-            onClick={async () => {
-              setLoading('nfse-reconcile-all');
-              try {
-                const res = await fetch('/api/admin/nfse/resend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reconcileAll: true }) });
-                const d = await res.json() as { success?: boolean; message?: string; error?: string };
-                if (!res.ok) throw new Error(d.error || 'Erro');
-                showBanner('success', d.message || 'Reconciliação iniciada com sucesso.');
-                setTimeout(() => window.location.reload(), 2000);
-              } catch (err) {
-                showBanner('error', err instanceof Error ? err.message : 'Erro ao reconciliar NFS-e');
-              } finally {
-                setLoading(null);
-              }
-            }}
-            disabled={loading === 'nfse-reconcile-all'}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300 disabled:opacity-50"
-          >
-            {loading === 'nfse-reconcile-all' ? '…' : '⟳ Reconciliar pendentes'}
-          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -397,19 +330,19 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1.5">
-                      <button
-                        onClick={() => cancelNFSe(n.stripe_invoice_id)}
+                      {n.status === 'emitted' && n.nfse_numero && <button
+                        onClick={() => setCancelTarget(n)}
                         disabled={loading === `nfse-cancel-${n.stripe_invoice_id}`}
                         className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
                       >
-                        {loading === `nfse-cancel-${n.stripe_invoice_id}` ? '…' : 'Cancelar'}
-                      </button>
+                        Cancelar nota
+                      </button>}
                       <button
-                        onClick={() => resendNFSe(n.stripe_invoice_id)}
-                        disabled={loading === `nfse-resend-${n.stripe_invoice_id}`}
+                        onClick={() => reconcileNFSe(n.stripe_invoice_id)}
+                        disabled={n.status === 'canceled' || loading === `nfse-reconcile-${n.stripe_invoice_id}`}
                         className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
                       >
-                        {loading === `nfse-resend-${n.stripe_invoice_id}` ? '…' : 'Re-emitir'}
+                        {loading === `nfse-reconcile-${n.stripe_invoice_id}` ? '…' : 'Reconciliar pagamento'}
                       </button>
                     </div>
                   </td>
@@ -424,6 +357,26 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
           </table>
         </div>
       </section>
+
+      {cancelTarget && (
+        <div role="dialog" aria-modal="true" aria-labelledby="cancel-nfse-title" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
+            <h2 id="cancel-nfse-title" className="text-lg font-black">Cancelar NFS-e {cancelTarget.nfse_numero}?</h2>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              Esta ação é fiscal e irreversível. A nota cancelada não poderá ser reemitida pela reconciliação deste pagamento.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setCancelTarget(null)} className="rounded-xl border px-4 py-2 text-sm font-bold">Voltar</button>
+              <button
+                onClick={async () => { const target = cancelTarget; setCancelTarget(null); await cancelNFSe(target.stripe_invoice_id); }}
+                className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-700"
+              >
+                Confirmar cancelamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Seção Broadcast */}
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">

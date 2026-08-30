@@ -35,6 +35,7 @@ export default function AppShell({
   planName,
   maxMonthlyAnalyses,
   isSuperAdmin,
+  hasProductAccess = true,
 }: {
   user: { name: string; email: string };
   workspace: string;
@@ -42,6 +43,7 @@ export default function AppShell({
   planName?: string;
   maxMonthlyAnalyses?: number;
   isSuperAdmin?: boolean;
+  hasProductAccess?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -100,7 +102,7 @@ export default function AppShell({
         </div>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-6">
-        {nav.map((item) => {
+        {nav.filter((item) => hasProductAccess || item.href === '/minha-conta').map((item) => {
           const active =
             item.href === "/"
               ? pathname === "/"

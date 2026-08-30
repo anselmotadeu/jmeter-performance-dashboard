@@ -48,7 +48,6 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
     if (p === 'canceled') return { type: 'error', msg: 'Upgrade cancelado. Nenhuma cobrança foi realizada.' };
     return null;
   });
-  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showReactivateModal, setShowReactivateModal] = useState<{ action: 'upgrade' | 'downgrade'; planSlug: string } | null>(null);
 
   const loadDetail = useCallback(() => {
@@ -90,7 +89,6 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
       setFeedback({ type: 'error', msg: err instanceof Error ? err.message : 'Erro ao processar a solicitação.' });
     } finally {
       setActionLoading(null);
-      setShowCancelConfirm(false);
     }
   }
 
@@ -100,10 +98,6 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
 
   async function handleDowngrade(planSlug: string, reactivate = false) {
     await callApi('/api/subscription/downgrade', { planSlug, reactivate }, 'Downgrade agendado com sucesso.');
-  }
-
-  async function handleCancel() {
-    await callApi('/api/subscription/cancel', {}, 'Cancelamento agendado. Você mantém o acesso até o fim do ciclo.');
   }
 
   async function handlePortal() {
@@ -259,39 +253,17 @@ export default function MinhaContaClient({ userName, userEmail }: { userName: st
                     Downgrade para Gráfico
                   </button>
                 )}
-                <button
-                  onClick={() => setShowCancelConfirm(true)}
-                  disabled={!!actionLoading || isCanceledScheduled}
+                 <button
+                   onClick={handlePortal}
+                   disabled={!!actionLoading || isCanceledScheduled}
                   className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950/30 disabled:opacity-50"
                 >
                   <Ban className="h-4 w-4" />
-                  {isCanceledScheduled ? 'Cancelamento já agendado' : 'Cancelar assinatura'}
-                </button>
+                   {isCanceledScheduled ? 'Cancelamento já agendado' : 'Cancelar no Stripe'}
+                 </button>
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Confirmação de cancelamento */}
-      {showCancelConfirm && (
-        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
-            <h3 className="text-lg font-bold">Cancelar assinatura?</h3>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-              Você mantém o acesso até o fim do ciclo atual. Nenhum reembolso será gerado por período parcial.
-            </p>
-            <div className="mt-5 flex gap-3">
-              <button
-                onClick={handleCancel}
-                disabled={!!actionLoading}
-                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {actionLoading === '/api/subscription/cancel' ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Confirmar cancelamento'}
-              </button>
-              <button onClick={() => setShowCancelConfirm(false)} className="flex-1 rounded-xl border py-2.5 text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800">Manter plano</button>
-            </div>
-          </div>
         </div>
       )}
 

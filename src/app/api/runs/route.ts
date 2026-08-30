@@ -5,11 +5,15 @@ import { readJsonWithLimit, RequestTooLargeError } from "@/lib/request";
 import { saveRunSchema } from "@/lib/run-schema";
 import { listRuns } from "@/lib/run-data";
 import { sanitizeLabel, sanitizeMessage } from "@/lib/sanitize";
+import { requireProductAccess } from "@/lib/billing-access";
+import { getCurrentPlan } from "@/lib/subscription";
 
 export async function GET(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session)
     return Response.json({ error: "Não autorizado." }, { status: 401 });
+  const accessError = await requireProductAccess(session.user.id);
+  if (accessError) return accessError;
   return Response.json({ runs: await listRuns(session.user.id) });
 }
 
@@ -17,6 +21,9 @@ export async function POST(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session)
     return Response.json({ error: "Não autorizado." }, { status: 401 });
+  const accessError = await requireProductAccess(session.user.id);
+  if (accessError) return accessError;
+  const productPlan = await getCurrentPlan(session.user.id);
   let body: unknown;
   try {
     body = await readJsonWithLimit(request, 3 * 1024 * 1024);
@@ -86,7 +93,7 @@ export async function POST(request: Request) {
       );
     }
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-      project.rows[0].workspaceId,
+      session.user.id,
     ]);
     const concurrent = await client.query<{ id:string;payloadHash:string }>('SELECT id,payload_hash AS "payloadHash" FROM analysis_run WHERE created_by=$1 AND idempotency_key=$2',[session.user.id,input.idempotencyKey]);
     if(concurrent.rows[0]){
@@ -95,10 +102,16 @@ export async function POST(request: Request) {
       return Response.json({id:concurrent.rows[0].id,duplicate:true});
     }
     const quota = await client.query<{ used: number; limit: number }>(
-      `SELECT count(*)::int AS used,w.monthly_analysis_limit AS limit FROM workspace w
-       LEFT JOIN usage_event u ON u.workspace_id=w.id AND u.event_type='analysis_saved'
-         AND u.created_at>=date_trunc('month',now()) WHERE w.id=$1 GROUP BY w.id`,
-      [project.rows[0].workspaceId],
+      `SELECT count(au.id)::int AS used, p.max_monthly_analyses AS limit
+       FROM subscription s
+       JOIN plan p ON p.id = s.plan_id
+       LEFT JOIN analysis_usage au ON au.user_id = s.user_id
+         AND au.processed_at >= date_trunc('month', now())
+       WHERE s.user_id = $1 AND s.status IN ('active', 'trialing')
+         AND (s.status <> 'trialing' OR s.current_period_end > now())
+       GROUP BY p.max_monthly_analyses
+       ORDER BY max(s.created_at) DESC LIMIT 1`,
+      [session.user.id],
     );
     if (quota.rows[0] && quota.rows[0].used >= quota.rows[0].limit) {
       await client.query("ROLLBACK");
@@ -268,6 +281,7 @@ export async function POST(request: Request) {
     if (
       baseline.rows[0] &&
       baseline.rows[0].runId !== runId &&
+      productPlan.limits.comparativeRuns &&
       baseline.rows[0].framework === analysis.framework &&
       baseline.rows[0].dataQuality === "certified" &&
       analysis.dataQuality === "certified"
@@ -360,6 +374,12 @@ export async function POST(request: Request) {
         analysis.successCount + analysis.errorCount,
         JSON.stringify({ framework: analysis.framework }),
       ],
+    );
+    await client.query(
+      `INSERT INTO analysis_usage (user_id, plan_slug)
+       SELECT $1, p.slug FROM subscription s JOIN plan p ON p.id = s.plan_id
+       WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
+      [session.user.id],
     );
     await client.query("COMMIT");
     return Response.json({ id: runId }, { status: 201 });

@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { isAdmin } from '@/lib/admin';
-import { reconcileRecentNFSeEmissions } from '@/lib/nfse';
+import { reconcileNFSePayment, reconcileRecentNFSeEmissions } from '@/lib/nfse';
 
 export async function POST(req: NextRequest) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -30,17 +30,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Re-emitir uma invoice específica
+  // Reconciliar uma invoice específica, sem reemitir notas já emitidas/canceladas.
   const { stripeInvoiceId } = body;
   if (!stripeInvoiceId) return NextResponse.json({ error: 'stripeInvoiceId é obrigatório' }, { status: 400 });
 
-  const result = await reconcileRecentNFSeEmissions();
-  return NextResponse.json({
-    success: result.failed === 0,
-    message: `Re-emissão concluída: ${result.processed} emitidas, ${result.failed} falhas`,
-    checked: result.checked,
-    emitted: result.processed,
-    failed: result.failed,
-    errors: result.errors,
-  });
+  try {
+    const result = await reconcileNFSePayment(stripeInvoiceId);
+    return NextResponse.json({ success: true, ...result });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Falha ao reconciliar pagamento.' },
+      { status: 409 },
+    );
+  }
 }

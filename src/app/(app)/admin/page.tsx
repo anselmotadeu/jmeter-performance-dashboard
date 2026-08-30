@@ -46,6 +46,7 @@ export default async function AdminPage() {
         p.slug  AS plan_slug,
         s.status,
         s.current_period_end,
+        s.stripe_customer_id,
         (
           SELECT COUNT(*)
           FROM analysis_usage au
@@ -53,7 +54,10 @@ export default async function AdminPage() {
             AND au.processed_at >= date_trunc('month', NOW())
         ) AS usage_this_month
       FROM "user" u
-      LEFT JOIN subscription s ON s.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT * FROM subscription candidate
+        WHERE candidate.user_id = u.id ORDER BY candidate.created_at DESC LIMIT 1
+      ) s ON true
       LEFT JOIN plan p ON p.id = s.plan_id
       ORDER BY u."createdAt" DESC
       LIMIT 100
@@ -62,13 +66,13 @@ export default async function AdminPage() {
       SELECT COALESCE(SUM(p.price_cents), 0) AS mrr
       FROM subscription s
       INNER JOIN plan p ON p.id = s.plan_id
-      WHERE s.status IN ('active', 'trialing')
+       WHERE s.status = 'active'
         AND (s.current_period_end IS NULL OR s.current_period_end > now())
     `),
     db.query<{ new_subscribers: string }>(`
       SELECT COUNT(*) AS new_subscribers
       FROM subscription
-      WHERE status IN ('active', 'trialing')
+       WHERE status = 'active'
         AND created_at >= now() - interval '30 days'
     `),
     db.query<{ churned: string }>(`

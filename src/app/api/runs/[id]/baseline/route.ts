@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { requirePlanFeature } from "@/lib/billing-access";
 
 export async function PUT(
   request: Request,
@@ -9,6 +10,8 @@ export async function PUT(
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session)
     return Response.json({ error: "Não autorizado." }, { status: 401 });
+  const accessError = await requirePlanFeature(session.user.id, 'comparativeRuns');
+  if (accessError) return accessError;
   const { id } = await params;
   if (!z.uuid().safeParse(id).success)
     return Response.json({ error: "ID inválido." }, { status: 400 });

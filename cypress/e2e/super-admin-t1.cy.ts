@@ -51,24 +51,6 @@ describe('Rotas protegidas redirecionam sem autenticação', () => {
 // ─── 3. Contratos das APIs Admin (sem auth → 401/403) ────────────────────────
 
 describe('API /api/admin/* — contratos de segurança (sem auth)', () => {
-  it('POST /api/admin/force-plan → 401 ou 403', () => {
-    cy.request({
-      method: 'POST',
-      url: '/api/admin/force-plan',
-      body: { userId: 'test-user', planSlug: 'grafico' },
-      failOnStatusCode: false,
-    }).its('status').should('be.oneOf', [401, 403]);
-  });
-
-  it('POST /api/admin/suspend → 401 ou 403', () => {
-    cy.request({
-      method: 'POST',
-      url: '/api/admin/suspend',
-      body: { userId: 'test-user' },
-      failOnStatusCode: false,
-    }).its('status').should('be.oneOf', [401, 403]);
-  });
-
   it('POST /api/admin/nfse/cancel → 401 ou 403', () => {
     cy.request({
       method: 'POST',

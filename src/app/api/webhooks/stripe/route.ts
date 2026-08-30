@@ -3,7 +3,7 @@ import { stripe } from '@/lib/stripe';
 import { db } from '@/lib/db';
 import { clearSubscriptionCache } from '@/lib/subscription';
 import { emitirNFSeForInvoice, emitirNFSeForUpgradeSession, getInvoiceSubscriptionId } from '@/lib/nfse-webhook';
-import { sendSubscriptionConfirmationEmail, sendPaymentFailedEmail } from '@/lib/email';
+import { sendCancellationEmail, sendSubscriptionConfirmationEmail, sendPaymentFailedEmail } from '@/lib/email';
 import Stripe from 'stripe';
 
 export const maxDuration = 60;
@@ -35,16 +35,30 @@ export async function POST(request: Request) {
   }
 
   try {
+    const claimed = await db.query(
+      `INSERT INTO subscription_event
+         (stripe_event_id, event_type, event_created_at, status, processing_started_at)
+       VALUES ($1, $2, to_timestamp($3), 'processing', NOW())
+       ON CONFLICT (stripe_event_id) DO UPDATE
+         SET status = 'processing', processing_started_at = NOW(), error_message = NULL
+       WHERE subscription_event.status = 'failed'
+          OR (subscription_event.status = 'processing'
+              AND subscription_event.processing_started_at < NOW() - interval '2 minutes')
+       RETURNING stripe_event_id`,
+      [event.id, event.type, event.created],
+    );
+    if (claimed.rowCount === 0) return NextResponse.json({ received: true, duplicate: true });
+
     switch (event.type) {
       case 'checkout.session.completed':
-        await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session, event.created);
         break;
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        await handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
+        await handleSubscriptionUpdated(event.data.object as Stripe.Subscription, event.created);
         break;
       case 'customer.subscription.deleted':
-        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription, event.created);
         break;
       case 'invoice.paid':
       case 'invoice.payment_succeeded':
@@ -56,8 +70,17 @@ export async function POST(request: Request) {
       default:
         console.log(`[webhook] Unhandled event: ${event.type}`);
     }
+    await db.query(
+      `UPDATE subscription_event SET status = 'completed', processed_at = NOW()
+       WHERE stripe_event_id = $1`,
+      [event.id],
+    );
     return NextResponse.json({ received: true });
   } catch (error) {
+    await db.query(
+      `UPDATE subscription_event SET status = 'failed', error_message = $2 WHERE stripe_event_id = $1`,
+      [event.id, error instanceof Error ? error.message : String(error)],
+    ).catch(console.error);
     console.error('[webhook] Handler error:', error);
     return NextResponse.json({ error: 'Webhook handler failed' }, { status: 500 });
   }
@@ -112,6 +135,64 @@ async function clearTrial(userId: string) {
   }
 }
 
+async function deliverEmailOnce(
+  key: string,
+  recipient: string,
+  emailType: string,
+  send: () => Promise<void>,
+) {
+  const claimed = await db.query(
+    `INSERT INTO email_delivery (delivery_key, recipient, email_type)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (delivery_key) DO UPDATE
+       SET status = 'processing', processing_started_at = NOW()
+     WHERE email_delivery.status = 'processing'
+       AND email_delivery.processing_started_at < NOW() - interval '10 minutes'
+     RETURNING delivery_key`,
+    [key, recipient, emailType],
+  );
+  if (claimed.rowCount === 0) return;
+  try {
+    await send();
+    await db.query(`UPDATE email_delivery SET status = 'sent', sent_at = NOW() WHERE delivery_key = $1`, [key]);
+  } catch (error) {
+    await db.query(
+      `UPDATE email_delivery SET processing_started_at = NOW() - interval '11 minutes' WHERE delivery_key = $1`,
+      [key],
+    );
+    throw error;
+  }
+}
+
+async function sendSubscriptionWelcome(params: {
+  userId: string;
+  subscriptionId: string;
+  planName: string;
+  priceCents: number;
+  periodEnd: number | null;
+}) {
+  const user = await db.query<{ email: string; name: string | null }>(
+    `SELECT email, name FROM "user" WHERE id = $1 LIMIT 1`,
+    [params.userId],
+  );
+  if (!user.rows[0]) return;
+  const renewalDate = params.periodEnd
+    ? new Date(params.periodEnd * 1000).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+    : '—';
+  const priceBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+    .format(params.priceCents / 100);
+  await deliverEmailOnce(`subscription_welcome_${params.subscriptionId}`, user.rows[0].email, 'subscription_welcome', () =>
+    sendSubscriptionConfirmationEmail({
+      to: user.rows[0].email,
+      userName: user.rows[0].name || user.rows[0].email,
+      planName: params.planName,
+      priceBRL,
+      renewalDate,
+      appUrl: process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app',
+    }),
+  );
+}
+
 /**
  * Upsert da subscription no banco.
  * Usa ON CONFLICT (stripe_subscription_id) — requer índice único criado na migration 010.
@@ -125,19 +206,25 @@ async function upsertSubscription(params: {
   periodEnd: number | null;
   cancelAtPeriodEnd: boolean;
   cancelAt?: number | null;
-}) {
-  await db.query(
+  eventCreated: number;
+}): Promise<boolean> {
+  const result = await db.query(
     `INSERT INTO subscription
        (user_id, plan_id, stripe_customer_id, stripe_subscription_id,
-        status, current_period_start, current_period_end, cancel_at_period_end, cancel_at)
-     VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8)
+         status, current_period_start, current_period_end, cancel_at_period_end, cancel_at,
+         last_stripe_event_created)
+     VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, to_timestamp($9))
      ON CONFLICT (stripe_subscription_id) DO UPDATE
        SET status               = EXCLUDED.status,
            plan_id              = EXCLUDED.plan_id,
            current_period_end   = EXCLUDED.current_period_end,
            cancel_at_period_end = EXCLUDED.cancel_at_period_end,
            cancel_at            = EXCLUDED.cancel_at,
-           updated_at           = NOW()`,
+            last_stripe_event_created = EXCLUDED.last_stripe_event_created,
+            updated_at           = NOW()
+      WHERE subscription.last_stripe_event_created IS NULL
+         OR subscription.last_stripe_event_created <= EXCLUDED.last_stripe_event_created
+      RETURNING subscription.id`,
     [
       params.userId,
       params.planId,
@@ -147,9 +234,11 @@ async function upsertSubscription(params: {
       params.periodEnd ? new Date(params.periodEnd * 1000) : null,
       params.cancelAtPeriodEnd,
       params.cancelAt ? new Date(params.cancelAt * 1000) : null,
+      params.eventCreated,
     ]
   );
-  clearSubscriptionCache(params.userId);
+  if (result.rowCount) clearSubscriptionCache(params.userId);
+  return (result.rowCount ?? 0) > 0;
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -160,7 +249,7 @@ async function upsertSubscription(params: {
  * 1. Nova assinatura (mode=subscription)
  * 2. Pagamento de upgrade (metadata.type="upgrade", mode=payment)
  */
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+async function handleCheckoutCompleted(session: Stripe.Checkout.Session, eventCreated: number) {
   const customerId = session.customer as string;
   const metadata = (session.metadata ?? {}) as Record<string, string>;
   const userId = await resolveUserId(customerId, metadata);
@@ -184,8 +273,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       return;
     }
 
-    await clearTrial(userId);
-    await upsertSubscription({
+    if (sub.status === 'active') await clearTrial(userId);
+    const applied = await upsertSubscription({
       userId,
       planId: planResult.rows[0].id,
       stripeCustomerId: customerId,
@@ -194,27 +283,18 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       periodEnd: getPeriodEnd(sub),
       cancelAtPeriodEnd: sub.cancel_at_period_end,
       cancelAt: getCancelAt(sub),
+      eventCreated,
     });
+    if (!applied) return;
 
-    // Email de confirmação (fire-and-forget)
-    const periodEndRaw = getPeriodEnd(sub);
-    const renewalDate = periodEndRaw
-      ? new Date(periodEndRaw * 1000).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
-      : '—';
-    const userRow = await db.query<{ email: string; name: string | null }>(
-      `SELECT email, name FROM "user" WHERE id = $1 LIMIT 1`, [userId]
-    );
-    if (userRow.rows[0]) {
-      const priceBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-        .format(planResult.rows[0].price_cents / 100);
-      sendSubscriptionConfirmationEmail({
-        to: userRow.rows[0].email,
-        userName: userRow.rows[0].name || userRow.rows[0].email,
+    if (sub.status === 'active') {
+      await sendSubscriptionWelcome({
+        userId,
+        subscriptionId: sub.id,
         planName: planResult.rows[0].name,
-        priceBRL,
-        renewalDate,
-        appUrl: process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app',
-      }).catch(err => console.error('[webhook] Email confirmação falhou:', err));
+        priceCents: planResult.rows[0].price_cents,
+        periodEnd: getPeriodEnd(sub),
+      });
     }
 
     console.log(`[webhook] checkout.subscription: userId=${userId} plan=${planResult.rows[0].slug} sub=${sub.id}`);
@@ -253,7 +333,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       return;
     }
 
-    await upsertSubscription({
+    const applied = await upsertSubscription({
       userId: upgradeUserId,
       planId: planResult.rows[0].id,
       stripeCustomerId: customerId,
@@ -262,7 +342,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       periodEnd: getPeriodEnd(updated),
       cancelAtPeriodEnd: updated.cancel_at_period_end,
       cancelAt: getCancelAt(updated),
+      eventCreated,
     });
+    if (!applied) return;
     await db.query(
       `UPDATE subscription SET pending_downgrade_plan = NULL, pending_downgrade_date = NULL, updated_at = NOW()
         WHERE stripe_subscription_id = $1`,
@@ -277,7 +359,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
  * customer.subscription.created / updated
  * Reflete QUALQUER mudança feita no Stripe (Dashboard, Portal, API, schedule).
  */
-async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
+async function handleSubscriptionUpdated(subscription: Stripe.Subscription, eventCreated: number) {
+  // Materialize current Stripe state instead of trusting an out-of-order payload.
+  subscription = await stripe.subscriptions.retrieve(subscription.id);
+  const previous = await db.query<{ cancel_at_period_end: boolean }>(
+    `SELECT cancel_at_period_end FROM subscription WHERE stripe_subscription_id = $1 LIMIT 1`,
+    [subscription.id],
+  );
   const customerId = subscription.customer as string;
   const meta = (subscription.metadata ?? {}) as Record<string, string>;
   const userId = await resolveUserId(customerId, meta);
@@ -298,7 +386,8 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     return;
   }
 
-  await upsertSubscription({
+  if (subscription.status === 'active') await clearTrial(userId);
+  const applied = await upsertSubscription({
     userId,
     planId: planResult.rows[0].id,
     stripeCustomerId: customerId,
@@ -307,57 +396,43 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     periodEnd: getPeriodEnd(subscription),
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
     cancelAt: getCancelAt(subscription),
+    eventCreated,
   });
+  if (!applied) return;
   await db.query(
     `UPDATE subscription SET pending_downgrade_plan = NULL, pending_downgrade_date = NULL, updated_at = NOW()
       WHERE stripe_subscription_id = $1 AND pending_downgrade_plan = $2`,
     [subscription.id, planResult.rows[0].slug]
   );
 
-  // Enviar email de confirmação quando subscription fica active pela primeira vez
-  // Fallback para quando checkout.session.completed falha ou é entregue com atraso
   if (subscription.status === 'active') {
-    const emailSentCheck = await db.query<{ count: string }>(
-      `SELECT count(*)::int FROM nfse_emission WHERE stripe_invoice_id LIKE 'confirm_email_%' AND user_id = $1`,
-      [userId]
+    const planRow = await db.query<{ name: string; price_cents: number }>(
+      `SELECT name, price_cents FROM plan WHERE stripe_price_id = $1 LIMIT 1`, [priceId]
     );
-    const alreadySent = parseInt(emailSentCheck.rows[0]?.count ?? '0') > 0;
-
-    if (!alreadySent) {
-      try {
-        const userRow = await db.query<{ email: string; name: string | null }>(
-          `SELECT email, name FROM "user" WHERE id = $1 LIMIT 1`, [userId]
-        );
-        const planRow = await db.query<{ name: string; price_cents: number }>(
-          `SELECT name, price_cents FROM plan WHERE stripe_price_id = $1 LIMIT 1`, [priceId]
-        );
-        if (userRow.rows[0] && planRow.rows[0]) {
-          const periodEndRaw = getPeriodEnd(subscription);
-          const renewalDate = periodEndRaw
-            ? new Date(periodEndRaw * 1000).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
-            : '—';
-          const priceBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-            .format(planRow.rows[0].price_cents / 100);
-
-          await sendSubscriptionConfirmationEmail({
-            to: userRow.rows[0].email,
-            userName: userRow.rows[0].name || userRow.rows[0].email,
-            planName: planRow.rows[0].name,
-            priceBRL,
-            renewalDate,
-            appUrl: process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app',
-          });
-
-          // Marcar que o email foi enviado (evitar duplicata)
-          await db.query(
-            `INSERT INTO nfse_emission (stripe_invoice_id, user_id, status) VALUES ($1, $2, 'emitted') ON CONFLICT DO NOTHING`,
-            [`confirm_email_${subscription.id}`, userId]
-          );
-          console.log(`[webhook] Email de confirmação enviado para ${userRow.rows[0].email}`);
-        }
-      } catch (emailErr) {
-        console.error('[webhook] Falha ao enviar email de confirmação:', emailErr);
-      }
+    if (planRow.rows[0]) await sendSubscriptionWelcome({
+      userId,
+      subscriptionId: subscription.id,
+      planName: planRow.rows[0].name,
+      priceCents: planRow.rows[0].price_cents,
+      periodEnd: getPeriodEnd(subscription),
+    });
+  }
+  if (subscription.cancel_at_period_end && !previous.rows[0]?.cancel_at_period_end) {
+    const user = await db.query<{ email: string; name: string | null }>(
+      `SELECT email, name FROM "user" WHERE id = $1 LIMIT 1`, [userId],
+    );
+    const plan = await db.query<{ name: string }>(`SELECT name FROM plan WHERE id = $1`, [planResult.rows[0].id]);
+    if (user.rows[0]) {
+      const end = getPeriodEnd(subscription);
+      await deliverEmailOnce(`subscription_cancel_${subscription.id}_${end ?? 'end'}`, user.rows[0].email, 'subscription_cancel', () =>
+        sendCancellationEmail({
+          to: user.rows[0].email,
+          userName: user.rows[0].name || user.rows[0].email,
+          planName: plan.rows[0]?.name ?? 'atual',
+          accessUntil: end ? new Date(end * 1000).toLocaleDateString('pt-BR') : 'fim do período atual',
+          appUrl: process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app',
+        }),
+      );
     }
   }
 
@@ -368,16 +443,29 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
  * customer.subscription.deleted
  * Marca a subscription como cancelada no banco.
  */
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
-  await db.query(
-    `UPDATE subscription SET status = 'canceled', canceled_at = NOW(), updated_at = NOW()
-     WHERE stripe_subscription_id = $1`,
-    [subscription.id]
-  );
+async function handleSubscriptionDeleted(subscription: Stripe.Subscription, eventCreated: number) {
   const customerId = subscription.customer as string;
   const meta = (subscription.metadata ?? {}) as Record<string, string>;
   const userId = await resolveUserId(customerId, meta);
-  if (userId) clearSubscriptionCache(userId);
+  if (!userId) throw new Error(`Usuário não encontrado para assinatura cancelada ${subscription.id}.`);
+  const priceId = subscription.items.data[0]?.price.id;
+  if (!priceId) throw new Error(`Preço ausente na assinatura cancelada ${subscription.id}.`);
+  const plan = await db.query<{ id: string }>(`SELECT id FROM plan WHERE stripe_price_id = $1 LIMIT 1`, [priceId]);
+  if (!plan.rows[0]) throw new Error(`Plano não encontrado para preço ${priceId}.`);
+  const applied = await upsertSubscription({
+    userId,
+    planId: plan.rows[0].id,
+    stripeCustomerId: customerId,
+    stripeSubscriptionId: subscription.id,
+    status: 'canceled',
+    periodEnd: getPeriodEnd(subscription),
+    cancelAtPeriodEnd: false,
+    cancelAt: getCancelAt(subscription),
+    eventCreated,
+  });
+  if (applied) {
+    await db.query(`UPDATE subscription SET canceled_at = NOW() WHERE stripe_subscription_id = $1`, [subscription.id]);
+  }
   console.log(`[webhook] subscription.deleted: ${subscription.id}`);
 }
 
@@ -387,13 +475,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
  */
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
   const subscriptionId = getInvoiceSubscriptionId(invoice);
-  if (subscriptionId) {
-    await db.query(
-      `UPDATE subscription SET status = 'active', updated_at = NOW()
-       WHERE stripe_subscription_id = $1`,
-      [subscriptionId]
-    );
-  }
   console.log(`[webhook] payment_succeeded: invoice=${invoice.id} sub=${subscriptionId ?? 'none'}`);
   await emitirNFSeForInvoice(invoice);
 }
@@ -406,12 +487,6 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   if (!subscriptionId) return;
 
-  await db.query(
-    `UPDATE subscription SET status = 'past_due', updated_at = NOW()
-     WHERE stripe_subscription_id = $1`,
-    [subscriptionId]
-  );
-
   const sub = await db.query<{ user_id: string; plan_name: string }>(
     `SELECT s.user_id, p.name as plan_name FROM subscription s JOIN plan p ON p.id = s.plan_id
      WHERE s.stripe_subscription_id = $1 LIMIT 1`,
@@ -422,12 +497,14 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
       `SELECT email, name FROM "user" WHERE id = $1 LIMIT 1`, [sub.rows[0].user_id]
     );
     if (user.rows[0]) {
-      sendPaymentFailedEmail({
-        to: user.rows[0].email,
-        userName: user.rows[0].name || user.rows[0].email,
-        planName: sub.rows[0].plan_name,
-        appUrl: process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app',
-      }).catch(err => console.error('[webhook] Email payment_failed falhou:', err));
+      await deliverEmailOnce(`payment_failed_${invoice.id}`, user.rows[0].email, 'payment_failed', () =>
+        sendPaymentFailedEmail({
+          to: user.rows[0].email,
+          userName: user.rows[0].name || user.rows[0].email,
+          planName: sub.rows[0].plan_name,
+          appUrl: process.env.BETTER_AUTH_URL || 'https://jmeter-performance-dashboard.vercel.app',
+        }),
+      );
     }
   }
 

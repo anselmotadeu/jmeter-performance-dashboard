@@ -159,7 +159,6 @@ function buildRpsXml(params: {
 
 async function signXml(xml: string, keyPem: string, certPem: string, certB64: string): Promise<string> {
   await loadNodeDeps();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sig = new SignedXml({
     privateKey: keyPem,
     publicCert: certPem,
@@ -320,43 +319,35 @@ export async function probeNFSeEndpoints(): Promise<{ homo: string; prod: string
 }
 
 export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
+  if (process.env.NFSE_HOMOLOGACAO === 'true') {
+    throw new Error('Emissão automática desabilitada em homologação. Use o teste de conexão NFS-e.');
+  }
   const cert = await loadCertificate();
   if (!cert) throw new Error('Certificado NFS-e não configurado');
 
   const cnpjDigits = input.cnpjOuCpf.replace(/\D/g, '');
   if (!cnpjDigits) throw new Error(`CPF/CNPJ ausente para invoice ${input.stripeInvoiceId}`);
 
-  // Verificar emissão existente
-  const existing = await db.query<{ id: number; status: string; created_at: Date }>(
-    `SELECT id, status, created_at FROM nfse_emission WHERE stripe_invoice_id = $1 LIMIT 1`,
-    [input.stripeInvoiceId]
+  const inserted = await db.query<{ id: number }>(
+    `INSERT INTO nfse_emission (stripe_invoice_id, user_id, status, processing_started_at)
+     VALUES ($1, $2, 'pending', NOW())
+     ON CONFLICT (stripe_invoice_id) DO NOTHING RETURNING id`,
+    [input.stripeInvoiceId, input.userId],
   );
-  if (existing.rows[0]?.status === 'emitted') return;
-  if (existing.rows[0]?.status === 'pending' &&
-      Date.now() - existing.rows[0].created_at.getTime() < 2 * 60_000) return;
-
-  // Inserir ou buscar registro
-  let emissionId: number;
-  if (existing.rows.length === 0) {
-    const ins = await db.query<{ id: number }>(
-      `INSERT INTO nfse_emission (stripe_invoice_id, user_id, status)
-       VALUES ($1, $2, 'pending') ON CONFLICT (stripe_invoice_id) DO NOTHING RETURNING id`,
-      [input.stripeInvoiceId, input.userId]
+  let emissionId = inserted.rows[0]?.id;
+  if (!emissionId) {
+    const claimed = await db.query<{ id: number }>(
+      `UPDATE nfse_emission
+       SET status = 'pending', error_message = NULL, processing_started_at = NOW(), updated_at = NOW()
+       WHERE stripe_invoice_id = $1
+         AND (status = 'error' OR (status = 'pending' AND processing_started_at < NOW() - interval '2 minutes'))
+       RETURNING id`,
+      [input.stripeInvoiceId],
     );
-    if (ins.rows.length > 0) {
-      emissionId = ins.rows[0].id;
-    } else {
-      const concurrent = await db.query<{ id: number; status: string }>(
-        `SELECT id, status FROM nfse_emission WHERE stripe_invoice_id = $1 LIMIT 1`,
-        [input.stripeInvoiceId]
-      );
-      if (!concurrent.rows[0] || concurrent.rows[0].status === 'emitted') return;
-      emissionId = concurrent.rows[0].id;
-    }
-  } else {
-    emissionId = existing.rows[0].id;
-    await db.query(`UPDATE nfse_emission SET status='pending', error_message=null WHERE id=$1`, [emissionId]);
+    emissionId = claimed.rows[0]?.id;
   }
+  // emitted, canceled or another worker currently processing: never issue again.
+  if (!emissionId) return;
 
   try {
     const today = todayBrasilia(); // UTC-3 Brasília — prefeitura SP rejeita datas futuras
@@ -376,9 +367,8 @@ export async function emitirNFSe(input: EmitirNFSeInput): Promise<void> {
     const signedXml = await signXml(rpsXml, cert.keyPem, cert.certPem, cert.certB64);
     const method = SOAP_METHODS.emitir;
     const soapBody = buildSoapEnvelope(signedXml, method.requestElement);
-    const isHomo = process.env.NFSE_HOMOLOGACAO === 'true';
     const response = await httpsPost(
-      isHomo ? WS_HOMO : WS_PROD,
+      WS_PROD,
       soapBody, makeMTLSAgent(cert), method.soapAction
     );
 
@@ -466,8 +456,11 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
     const raw = invoice as unknown as Record<string, number>;
     if ((raw.amount_paid ?? 0) <= 0) continue;
     try {
+      const before = await getNFSeEmission(invoice.id);
+      if (before?.status === 'canceled') continue;
       await emitirNFSeForInvoice(invoice);
-      processed++;
+      const after = await getNFSeEmission(invoice.id);
+      if (before?.status !== 'emitted' && after?.status === 'emitted') processed++;
     } catch (err) {
       failed++;
       errors.push({ invoiceId: invoice.id, error: err instanceof Error ? err.message : String(err) });
@@ -475,6 +468,43 @@ export async function reconcileRecentNFSeEmissions(): Promise<{
   }
 
   return { checked: invoices.data.length, processed, failed, errors };
+}
+
+export async function reconcileNFSePayment(stripeInvoiceId: string): Promise<{ emitted: boolean; message: string }> {
+  const existing = await getNFSeEmission(stripeInvoiceId);
+  if (existing?.status === 'canceled') {
+    throw new Error('A NFS-e deste pagamento foi cancelada e não pode ser emitida novamente.');
+  }
+  const { stripe } = await import('@/lib/stripe');
+  const { emitirNFSeForInvoice, emitirNFSeForUpgradeSession } = await import('@/lib/nfse-webhook');
+  if (stripeInvoiceId.startsWith('checkout_')) {
+    const session = await stripe.checkout.sessions.retrieve(stripeInvoiceId.slice('checkout_'.length));
+    if (session.payment_status !== 'paid') throw new Error('O checkout de upgrade não está pago.');
+    await emitirNFSeForUpgradeSession(session);
+    const emission = await getNFSeEmission(stripeInvoiceId);
+    if (emission?.status !== 'emitted') throw new Error(emission?.error_message || 'A nota fiscal não foi emitida.');
+    return {
+      emitted: existing?.status !== 'emitted',
+      message: existing?.status === 'emitted'
+        ? 'Pagamento já estava conciliado. Nenhuma nova nota ou e-mail foi gerado.'
+        : 'Pagamento reconciliado e NFS-e emitida com sucesso.',
+    };
+  }
+  const invoice = await stripe.invoices.retrieve(stripeInvoiceId);
+  const amountPaid = (invoice as unknown as Record<string, number>).amount_paid ?? 0;
+  if (invoice.status !== 'paid' || amountPaid <= 0) throw new Error('A invoice não está paga ou não possui valor faturável.');
+
+  await emitirNFSeForInvoice(invoice);
+  const emission = await getNFSeEmission(stripeInvoiceId);
+  if (emission?.status !== 'emitted') {
+    throw new Error(emission?.error_message || 'A nota fiscal não foi emitida. Verifique os dados fiscais do cliente.');
+  }
+  return {
+    emitted: existing?.status !== 'emitted',
+    message: existing?.status === 'emitted'
+      ? 'Pagamento já estava conciliado. Nenhuma nova nota ou e-mail foi gerado.'
+      : 'Pagamento reconciliado e NFS-e emitida com sucesso.',
+  };
 }
 
 // ─── Cancelamento de NFS-e ────────────────────────────────────────────────────
@@ -535,8 +565,16 @@ export async function cancelarNFSe(stripeInvoiceId: string): Promise<CancelarNFS
     return { success: false, error: 'Código de verificação não encontrado. Cancelamento requer o código.' };
   }
 
+  const claimed = await db.query(
+    `UPDATE nfse_emission SET status = 'canceling', updated_at = NOW()
+     WHERE stripe_invoice_id = $1 AND status = 'emitted' RETURNING id`,
+    [stripeInvoiceId],
+  );
+  if (claimed.rowCount === 0) return { success: false, error: 'A NFS-e já está sendo cancelada ou mudou de status.' };
+
   const cert = await loadCertificate();
   if (!cert) {
+    await db.query(`UPDATE nfse_emission SET status = 'emitted' WHERE stripe_invoice_id = $1`, [stripeInvoiceId]);
     return { success: false, error: 'Certificado digital não configurado (NFSE_CERT_BASE64 / NFSE_CERT_PASSWORD).' };
   }
 
@@ -566,11 +604,13 @@ export async function cancelarNFSe(stripeInvoiceId: string): Promise<CancelarNFS
     }
 
     const errorMsg = parseError(raw);
+    await db.query(`UPDATE nfse_emission SET status = 'emitted', error_message = $2 WHERE stripe_invoice_id = $1`, [stripeInvoiceId, errorMsg]);
     console.error(`[NFS-e] Cancelamento falhou: ${errorMsg}`);
     return { success: false, error: errorMsg, raw };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[NFS-e] Cancelamento exception:', err);
+    await db.query(`UPDATE nfse_emission SET status = 'emitted', error_message = $2 WHERE stripe_invoice_id = $1`, [stripeInvoiceId, message]);
     return { success: false, error: message };
   }
 }

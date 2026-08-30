@@ -8,12 +8,14 @@ interface CheckoutButtonProps {
   planSlug: string;
   isLoggedIn: boolean;
   hasCurrentPlan: boolean;
+  action?: 'checkout' | 'upgrade' | 'downgrade';
 }
 
 export default function CheckoutButton({
   planSlug,
   isLoggedIn,
   hasCurrentPlan,
+  action = 'checkout',
 }: CheckoutButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -29,14 +31,15 @@ export default function CheckoutButton({
     setError(null);
 
     try {
-      const res = await fetch('/api/checkout', {
+      const endpoint = action === 'checkout' ? '/api/checkout' : `/api/subscription/${action}`;
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ planSlug }),
       });
 
       // Tratar resposta mesmo quando corpo está vazio (evita "Unexpected end of JSON input")
-      let data: { url?: string; error?: string } = {};
+      let data: { url?: string; error?: string; success?: boolean; requiresReactivation?: boolean } = {};
       const text = await res.text();
       if (text) {
         try {
@@ -50,7 +53,15 @@ export default function CheckoutButton({
       if (!res.ok) {
         throw new Error(data.error || `Erro ${res.status} ao criar checkout`);
       }
+      if (data.requiresReactivation) {
+        throw new Error('Reative a assinatura no portal do Stripe antes de agendar o downgrade.');
+      }
 
+      if (action === 'downgrade' && data.success) {
+        router.push('/minha-conta');
+        router.refresh();
+        return;
+      }
       if (!data.url) {
         throw new Error('URL de checkout não retornada. Tente novamente.');
       }
@@ -88,7 +99,7 @@ export default function CheckoutButton({
         disabled={loading}
         className="w-full rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {loading ? 'Carregando...' : hasCurrentPlan ? 'Fazer Upgrade' : 'Assinar Agora'}
+        {loading ? 'Carregando...' : action === 'upgrade' ? 'Fazer upgrade no Stripe' : action === 'downgrade' ? 'Agendar downgrade' : hasCurrentPlan ? 'Alterar plano' : 'Assinar agora'}
       </button>
     </div>
   );

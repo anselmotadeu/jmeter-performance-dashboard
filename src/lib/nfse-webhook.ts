@@ -10,6 +10,7 @@ import { db } from '@/lib/db';
 import { emitirNFSe, getNFSeEmission, markNFSeEmailSent, markNFSeEmailError } from '@/lib/nfse';
 import { sendNFSeEmail } from '@/lib/email';
 import Stripe from 'stripe';
+import { isValidFiscalDocument } from '@/lib/fiscal-document';
 
 const FISCAL_DOCUMENT_KEY = 'cpf_cnpj';
 
@@ -32,17 +33,18 @@ async function syncCheckoutTaxId(customerId: string): Promise<string | null> {
   for (const session of sessions.data) {
     const field = session.custom_fields?.find((f) => f.key === FISCAL_DOCUMENT_KEY);
     const value = field?.text?.value?.replace(/\D/g, '') ?? '';
-    if (value.length === 11 || value.length === 14) return value;
+    if (isValidFiscalDocument(value)) return value;
   }
   const taxIds = await stripe.customers.listTaxIds(customerId, { limit: 10 });
   const taxId = taxIds.data.find((t) => t.type === 'br_cpf' || t.type === 'br_cnpj');
-  return taxId?.value?.replace(/\D/g, '') ?? null;
+  const value = taxId?.value?.replace(/\D/g, '') ?? '';
+  return isValidFiscalDocument(value) ? value : null;
 }
 
 function checkoutTaxId(session: Stripe.Checkout.Session): string | null {
   const field = session.custom_fields?.find((item) => item.key === FISCAL_DOCUMENT_KEY);
   const value = field?.text?.value?.replace(/\D/g, '') ?? '';
-  return value.length === 11 || value.length === 14 ? value : null;
+  return isValidFiscalDocument(value) ? value : null;
 }
 
 /** Busca userId + email + nome pelo stripe_customer_id */
@@ -110,6 +112,7 @@ async function ensureIssuedAndEmailed(params: {
 
   // Verificar se já foi emitida (idempotência)
   const existing = await getNFSeEmission(params.sourceId);
+  if (existing?.status === 'canceled') return;
   if (existing?.status !== 'emitted') {
     await emitirNFSe({
       stripeInvoiceId: params.sourceId,
@@ -127,10 +130,22 @@ async function ensureIssuedAndEmailed(params: {
 
   // Enviar e-mail se NFS-e emitida e e-mail ainda não enviado
   const emission = await getNFSeEmission(params.sourceId);
-  if (!emission?.nfse_numero || emission.email_sent_at) return;
+  if (emission?.status !== 'emitted' || !emission.nfse_numero || emission.email_sent_at) return;
   const recipient = params.customerEmail || params.user.email;
   if (!recipient) return;
 
+  const deliveryKey = `nfse_${params.sourceId}`;
+  const claimed = await db.query(
+    `INSERT INTO email_delivery (delivery_key, recipient, email_type)
+     VALUES ($1, $2, 'nfse')
+     ON CONFLICT (delivery_key) DO UPDATE
+       SET status = 'processing', processing_started_at = NOW()
+     WHERE email_delivery.status = 'processing'
+       AND email_delivery.processing_started_at < NOW() - interval '10 minutes'
+     RETURNING delivery_key`,
+    [deliveryKey, recipient],
+  );
+  if (claimed.rowCount === 0) return;
   try {
     await sendNFSeEmail({
       to: recipient,
@@ -143,9 +158,14 @@ async function ensureIssuedAndEmailed(params: {
       mesReferencia: params.mesReferencia,
     });
     await markNFSeEmailSent(emission.id, recipient);
+    await db.query(`UPDATE email_delivery SET status = 'sent', sent_at = NOW() WHERE delivery_key = $1`, [deliveryKey]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await markNFSeEmailError(emission.id, recipient, message);
+    await db.query(
+      `UPDATE email_delivery SET processing_started_at = NOW() - interval '11 minutes' WHERE delivery_key = $1`,
+      [deliveryKey],
+    );
     throw error;
   }
 }
@@ -167,14 +187,12 @@ export async function emitirNFSeForInvoice(invoice: Stripe.Invoice): Promise<voi
   try {
     const user = await getUserByCustomer(customerId);
     if (!user) {
-      console.warn(`[NFS-e] Customer ${customerId} sem usuário vinculado — skip`);
-      return;
+      throw new Error(`Customer ${customerId} sem usuário vinculado.`);
     }
 
     const cpfCnpjDigits = await syncCheckoutTaxId(customerId);
     if (!cpfCnpjDigits) {
-      console.warn(`[NFS-e] CPF/CNPJ não encontrado para customer ${customerId} invoice ${invoiceId} — skip`);
-      return;
+      throw new Error(`CPF/CNPJ válido não encontrado para customer ${customerId} invoice ${invoiceId}.`);
     }
 
     // Determinar plano a partir da subscription

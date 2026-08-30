@@ -10,6 +10,7 @@ import {
 import { hashAuthIdentifier } from "@/lib/auth-security";
 import { sendAuthEmail } from "@/lib/email";
 import { ensureWorkspace } from "@/lib/workspace";
+import { getOrCreateTrial } from "@/lib/subscription";
 
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
 if (process.env.NODE_ENV === "production") {
@@ -115,6 +116,7 @@ export const auth = betterAuth({
       create: {
         after: async (user) => {
           await ensureWorkspace(user.id, user.name);
+          await getOrCreateTrial(user.id);
         },
       },
     },

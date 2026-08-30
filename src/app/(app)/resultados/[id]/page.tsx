@@ -9,6 +9,7 @@ import PerformanceDashboard, {
 } from "@/components/app/PerformanceDashboard";
 import { auth } from "@/lib/auth";
 import { getRunDetail } from "@/lib/run-data";
+import { requireProductPageAccess } from "@/lib/page-access";
 
 export default async function RunDetailPage({
   params,
@@ -17,6 +18,7 @@ export default async function RunDetailPage({
 }) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null;
+  await requireProductPageAccess(session.user.id);
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   const detail = await getRunDetail(session.user.id, id);

@@ -1,2 +1,90 @@
-import Link from 'next/link';import { headers } from 'next/headers';import { FileSearch,Flag } from 'lucide-react';import PageHeader from '@/components/app/PageHeader';import { auth } from '@/lib/auth';import { listRuns } from '@/lib/run-data';export default async function Page(){const session=await auth.api.getSession({headers:await headers()});if(!session)return null;const runs=await listRuns(session.user.id);return <div className="space-y-7"><PageHeader eyebrow="Histórico" title="Resultados salvos" description="Consulte execuções por projeto, framework e baseline." actions={<Link href="/analisar" className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black text-white">Nova análise</Link>}/>{runs.length?<div className="grid gap-4 xl:grid-cols-2">{runs.map(run=><Link key={run.id} href={`/resultados/${run.id}`} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-indigo-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"><div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-black">{run.title}</h2><p className="mt-1 text-xs text-slate-500">{run.projectName} · {new Date(run.createdAt).toLocaleString('pt-BR')}</p></div>{run.isBaseline&&<span className="flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-black text-indigo-700"><Flag className="h-3.5 w-3.5"/>Baseline</span>}</div><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><Small label="Framework" value={run.framework}/><Small label="Requisições" value={(run.successCount+run.errorCount).toLocaleString('pt-BR')}/><Small label="Erros" value={run.errorCount.toLocaleString('pt-BR')}/><Small label="Duração" value={`${Math.round(run.durationMs/1000)}s`}/></div></Link>)}</div>:<div className="rounded-3xl border border-dashed bg-white p-10 text-center dark:bg-slate-900"><FileSearch className="mx-auto h-12 w-12 text-slate-400"/><h2 className="mt-4 text-xl font-black">Nenhum resultado salvo</h2><p className="mt-2 text-sm text-slate-500">Use os arquivos em `Tests/` para validar os gráficos.</p></div>}</div>}
-function Small({label,value}:{label:string;value:string}){return <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800"><div className="text-[10px] uppercase text-slate-500">{label}</div><div className="mt-1 truncate text-sm font-black">{value}</div></div>}
+import Link from "next/link";
+import { headers } from "next/headers";
+import { FileSearch, Flag } from "lucide-react";
+import PageHeader from "@/components/app/PageHeader";
+import { auth } from "@/lib/auth";
+import { listRuns } from "@/lib/run-data";
+import { requireProductPageAccess } from "@/lib/page-access";
+export default async function Page() {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return null;
+  await requireProductPageAccess(session.user.id);
+  const runs = await listRuns(session.user.id);
+  return (
+    <div className="space-y-7">
+      <PageHeader
+        eyebrow="Histórico"
+        title="Resultados salvos"
+        description="Consulte execuções por projeto, framework e baseline."
+        actions={
+          <Link
+            href="/analisar"
+            className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black text-white"
+          >
+            Nova análise
+          </Link>
+        }
+      />
+      {runs.length ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {runs.map((run) => (
+            <Link
+              key={run.id}
+              href={`/resultados/${run.id}`}
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-indigo-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black">{run.title}</h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {run.projectName} ·{" "}
+                    {new Date(run.createdAt).toLocaleString("pt-BR")}
+                  </p>
+                </div>
+                {run.isBaseline && (
+                  <span className="flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-black text-indigo-700">
+                    <Flag className="h-3.5 w-3.5" />
+                    Baseline
+                  </span>
+                )}
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Small label="Framework" value={run.framework} />
+                <Small
+                  label="Requisições"
+                  value={(run.successCount + run.errorCount).toLocaleString(
+                    "pt-BR",
+                  )}
+                />
+                <Small
+                  label="Erros"
+                  value={run.errorCount.toLocaleString("pt-BR")}
+                />
+                <Small
+                  label="Duração"
+                  value={`${Math.round(run.durationMs / 1000)}s`}
+                />
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-3xl border border-dashed bg-white p-10 text-center dark:bg-slate-900">
+          <FileSearch className="mx-auto h-12 w-12 text-slate-400" />
+          <h2 className="mt-4 text-xl font-black">Nenhum resultado salvo</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            Use os arquivos em `Tests/` para validar os gráficos.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+function Small({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+      <div className="text-[10px] uppercase text-slate-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-black">{value}</div>
+    </div>
+  );
+}

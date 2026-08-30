@@ -1,15 +1,17 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveSubscription, getCurrentPlan } from '@/lib/subscription';
+import { getCurrentPlan } from '@/lib/subscription';
+import { requireProductAccess } from '@/lib/billing-access';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const session = await auth.api.getSession({ headers: new Headers() });
-  // Fallback: tentar session dos headers da request
+export async function GET(request: Request) {
+  const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user?.id) {
     return Response.json({ error: 'Não autorizado.' }, { status: 401 });
   }
+  const accessError = await requireProductAccess(session.user.id);
+  if (accessError) return accessError;
 
   const plan = await getCurrentPlan(session.user.id);
 

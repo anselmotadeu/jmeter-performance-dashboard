@@ -5,7 +5,9 @@
  */
 
 import { db } from '@/lib/db';
-import { getPlanBySlug, getPlanByStripePrice, PANORAMA, type Plan } from '@/lib/plans';
+import { getPlanBySlug, getPlanByStripePrice, GRAFICO, type Plan } from '@/lib/plans';
+import { subscriptionHasAccess } from '@/lib/subscription-access';
+export { subscriptionHasAccess } from '@/lib/subscription-access';
 
 export interface Subscription {
   id: string;
@@ -77,20 +79,35 @@ const SUB_SELECT = `
     s.cancel_at_period_end, s.cancel_at, s.canceled_at,
     s.pending_downgrade_plan, s.pending_downgrade_date
   FROM subscription s JOIN plan p ON p.id = s.plan_id
-  WHERE s.user_id = $1 AND s.status IN ('active','trialing','past_due')
-  ORDER BY s.created_at DESC LIMIT 1
+  WHERE s.user_id = $1
+  ORDER BY
+    CASE
+      WHEN s.status = 'active' THEN 0
+      WHEN s.status = 'trialing' AND s.current_period_end > NOW() THEN 1
+      ELSE 2
+    END,
+    s.created_at DESC
+  LIMIT 1
 `;
 
-export async function getActiveSubscription(userId: string): Promise<Subscription | null> {
-  try {
-    const r = await db.query<SubRow>(SUB_SELECT, [userId]);
-    return r.rows[0] ? mapRow(r.rows[0]) : null;
-  } catch {
-    return null;
-  }
+export async function getLatestSubscription(userId: string): Promise<Subscription | null> {
+  const r = await db.query<SubRow>(SUB_SELECT, [userId]);
+  return r.rows[0] ? mapRow(r.rows[0]) : null;
 }
 
-export async function clearSubscriptionCache(_userId: string) {
+export async function getActiveSubscription(userId: string): Promise<Subscription | null> {
+  const subscription = await getLatestSubscription(userId);
+  return subscriptionHasAccess(subscription) ? subscription : null;
+}
+
+export async function userHasProductAccess(userId: string): Promise<boolean> {
+  const role = await db.query<{ role: string }>(`SELECT role FROM "user" WHERE id = $1`, [userId]);
+  if (role.rows[0]?.role === 'super_admin') return true;
+  return subscriptionHasAccess(await getLatestSubscription(userId));
+}
+
+export async function clearSubscriptionCache(userId: string) {
+  void userId;
   // No-op: sem cache em memória — cada request vai ao banco
 }
 
@@ -99,7 +116,7 @@ export async function clearSubscriptionCache(_userId: string) {
  * Lição TestDiff: trial bloqueia totalmente ao expirar.
  */
 export async function getOrCreateTrial(userId: string): Promise<Subscription | null> {
-  const existing = await getActiveSubscription(userId);
+  const existing = await getLatestSubscription(userId);
   if (existing) return existing;
 
   try {
@@ -124,8 +141,9 @@ export async function getOrCreateTrial(userId: string): Promise<Subscription | n
 }
 
 export async function getCurrentPlan(userId: string): Promise<Plan> {
-  const sub = await getActiveSubscription(userId);
-  if (!sub) return PANORAMA; // fallback para trial (limites Panorama)
+  const sub = await getLatestSubscription(userId);
+  // This fallback is display-only. Product access is always checked separately.
+  if (!sub) return GRAFICO;
   return getPlanBySlug(sub.planSlug);
 }
 
@@ -140,8 +158,6 @@ export async function getSubscriptionDetail(userId: string): Promise<{
   invoices: Array<{ id: string; date: string; amount: string; status: string; url: string | null }>;
 } | null> {
   try {
-    const sub = await getActiveSubscription(userId);
-
     // Verificar se expirou trial
     const trialRow = await db.query<SubRow>(
       `SELECT s.*, p.slug as plan_slug, p.name as plan_name, p.price_cents, p.max_monthly_analyses, p.id as plan_id
@@ -196,6 +212,15 @@ export async function getStripeCustomerId(userId: string): Promise<string | null
   } catch {
     return null;
   }
+}
+
+export async function getRecoverableStripeSubscription(userId: string): Promise<Subscription | null> {
+  const result = await db.query<SubRow>(
+    `${SUB_SELECT.replace('ORDER BY', `AND s.stripe_subscription_id IS NOT NULL
+      AND s.status NOT IN ('canceled', 'incomplete_expired') ORDER BY`)}`,
+    [userId],
+  );
+  return result.rows[0] ? mapRow(result.rows[0]) : null;
 }
 
 export { getPlanByStripePrice };

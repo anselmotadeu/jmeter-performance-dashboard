@@ -21,14 +21,14 @@ export async function GET() {
       SELECT COALESCE(SUM(p.price_cents), 0) AS mrr
       FROM subscription s
       INNER JOIN plan p ON p.id = s.plan_id
-      WHERE s.status IN ('active', 'trialing')
+       WHERE s.status = 'active'
         AND (s.current_period_end IS NULL OR s.current_period_end > now())
     `),
     // Novos assinantes nos últimos 30 dias
     db.query(`
       SELECT COUNT(*) AS new_subscribers
       FROM subscription
-      WHERE status IN ('active', 'trialing')
+       WHERE status = 'active'
         AND created_at >= now() - interval '30 days'
     `),
     // Churn: cancelamentos nos últimos 30 dias

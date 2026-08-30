@@ -8,6 +8,7 @@ interface TrialExpiredGateProps {
   isTrial: boolean;
   isExpired: boolean;
   trialDaysLeft: number;
+  blocked: boolean;
   children: React.ReactNode;
 }
 
@@ -17,6 +18,7 @@ export default function TrialExpiredGate({
   isTrial,
   isExpired,
   trialDaysLeft,
+  blocked,
   children,
 }: TrialExpiredGateProps) {
   const pathname = usePathname();
@@ -26,12 +28,12 @@ export default function TrialExpiredGate({
   const showBanner = isTrial && !isExpired && trialDaysLeft <= 2 && !isAllowed;
 
   useEffect(() => {
-    if (isTrial && isExpired && !isAllowed) {
+    if (blocked && !isAllowed) {
       router.push('/pricing?trial=expired');
     }
-  }, [isTrial, isExpired, isAllowed, router]);
+  }, [blocked, isAllowed, router]);
 
-  if (isTrial && isExpired && !isAllowed) {
+  if (blocked && !isAllowed) {
     return null;
   }
 

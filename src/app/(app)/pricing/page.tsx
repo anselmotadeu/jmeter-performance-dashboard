@@ -1,5 +1,4 @@
 import { headers } from 'next/headers';
-import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { auth } from '@/lib/auth';
 import { PLAN_LIST, type Plan } from '@/lib/plans';
@@ -10,7 +9,7 @@ import PortalButton from './PortalButton';
 export default async function PricingPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   const subscription = session ? await getActiveSubscription(session.user.id) : null;
-  const currentPlan = subscription?.planSlug || null;
+  const currentPlan = subscription?.status === 'active' ? subscription.planSlug : null;
 
   return (
     <div className="container mx-auto px-4 py-12 max-w-6xl">
@@ -103,6 +102,7 @@ export default async function PricingPage() {
                   planSlug={plan.slug}
                   isLoggedIn={!!session}
                   hasCurrentPlan={!!currentPlan}
+                  action={!currentPlan ? 'checkout' : plan.priceCents > (subscription?.priceCents ?? 0) ? 'upgrade' : 'downgrade'}
                 />
               )}
             </div>

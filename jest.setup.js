@@ -8,7 +8,7 @@ if (!global.ResizeObserver) {
   };
 }
 
-if (!window.matchMedia) {
+if (typeof window !== 'undefined' && !window.matchMedia) {
   window.matchMedia = () => ({
     matches: false,
     addListener() {},
