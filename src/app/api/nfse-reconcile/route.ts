@@ -14,6 +14,7 @@ async function handler(request: Request) {
     return Response.json({ error: 'Não autorizado.' }, { status: 401 });
   }
   const result = await reconcileRecentNFSeEmissions();
+  console.log(`[nfse-reconcile] ${JSON.stringify(result)}`);
   return Response.json(result);
 }
 
