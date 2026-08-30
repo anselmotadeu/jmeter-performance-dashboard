@@ -147,8 +147,9 @@ async function handleCheckout(session: Stripe.Checkout.Session) {
       const paymentIntentId = session.payment_intent as string;
       if (!paymentIntentId) return;
       const charges = await stripe.charges.list({ payment_intent: paymentIntentId, limit: 1 });
-      const invoiceId = charges.data[0]?.invoice;
-      if (!invoiceId || typeof invoiceId !== 'string') return;
+      const rawInvoice = (charges.data[0] as unknown as Record<string, unknown>)?.invoice;
+      const invoiceId = typeof rawInvoice === 'string' ? rawInvoice : (rawInvoice as { id: string } | null)?.id;
+      if (!invoiceId) return;
       const invoice = await stripe.invoices.retrieve(invoiceId);
       await emitirNFSeForInvoice(invoice);
     }).catch(err => console.error('[webhook] NFS-e upgrade falhou:', err));
@@ -161,8 +162,8 @@ async function handleCheckout(session: Stripe.Checkout.Session) {
   if (session.mode !== 'subscription') return;
 
   const customerId = session.customer as string;
-  const meta = (session.metadata ?? {}) as Record<string, string>;
-  const userId = meta.userId ?? await resolveUserId(customerId, meta);
+  const subMeta = (session.metadata ?? {}) as Record<string, string>;
+  const userId = subMeta.userId ?? await resolveUserId(customerId, subMeta);
   if (!userId) { console.warn('[webhook] checkout: userId não encontrado'); return; }
 
   const sub = await stripe.subscriptions.retrieve(session.subscription as string);
