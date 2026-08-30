@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import { Shield, Users, TrendingUp, TrendingDown, DollarSign, RefreshCw, Send, Ban, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Shield, Users, TrendingUp, TrendingDown, DollarSign, RefreshCw, Send, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ function StatusBadge({ status }: { status: string | null }) {
 
 export default function AdminClient({ initialUsers, initialNFSe, initialMRR, totalUsers, activeSubscriptions }: Props) {
   const [users, setUsers] = useState<UserRow[]>(initialUsers);
-  const [nfseList, setNFSeList] = useState<NFSeRow[]>(initialNFSe);
+  const [nfseList] = useState<NFSeRow[]>(initialNFSe);
   const [mrr, setMRR] = useState<MRR>(initialMRR);
   const [banner, setBanner] = useState<{ type: BannerType; message: string } | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
@@ -345,8 +345,28 @@ export default function AdminClient({ initialUsers, initialNFSe, initialMRR, tot
 
       {/* Seção NFS-e */}
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+        <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-800 flex items-center justify-between gap-4">
           <h2 className="text-lg font-bold">NFS-e — Últimas emissões</h2>
+          <button
+            onClick={async () => {
+              setLoading('nfse-reconcile-all');
+              try {
+                const res = await fetch('/api/admin/nfse/resend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reconcileAll: true }) });
+                const d = await res.json() as { success?: boolean; message?: string; error?: string };
+                if (!res.ok) throw new Error(d.error || 'Erro');
+                showBanner('success', d.message || 'Reconciliação iniciada com sucesso.');
+                setTimeout(() => window.location.reload(), 2000);
+              } catch (err) {
+                showBanner('error', err instanceof Error ? err.message : 'Erro ao reconciliar NFS-e');
+              } finally {
+                setLoading(null);
+              }
+            }}
+            disabled={loading === 'nfse-reconcile-all'}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300 disabled:opacity-50"
+          >
+            {loading === 'nfse-reconcile-all' ? '…' : '⟳ Reconciliar pendentes'}
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
