@@ -55,7 +55,7 @@ jobs:
         run: npx cypress run --headless --browser electron --spec 'cypress/e2e/**/*.cy.ts'
         env:
           CYPRESS_BASE_URL: http://localhost:3000
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: cypress-screenshots
